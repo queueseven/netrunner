@@ -89,6 +89,13 @@
    "Hedge Fund"
    {:effect (effect (gain :credit 9))}
 
+   "Hellion Alpha Test"
+   {:req (req (:installed-resource runner-reg))
+    :trace {:base 2 :choices {:req #(and (:installed %) (= (:type %) "Resource"))}
+            :msg (msg "add " (:title target) " to the top of the Stack")
+            :effect (effect (move :runner target :deck true))
+            :unsuccessful {:msg "take 1 bad publicity" :effect (effect (gain :corp :bad-publicity 1))}}}
+
    "Housekeeping"
    {:events {:runner-install {:req (req (= side :runner)) :choices (req (:hand runner))
                               :prompt "Choose a card to trash for Housekeeping" :once :per-turn
@@ -106,7 +113,7 @@
                       card targets))}
 
    "Invasion of Privacy"
-   {:trace {:base 2 :msg (msg "reveal the Runner's Grip")
+   {:trace {:base 2 :msg (msg "reveal the Runner's Grip and trash up to " (- target (second targets)) " resources or events")
             :effect (req (doseq [c (:hand runner)]
                            (move state side c :play-area)))
             :unsuccessful {:msg "take 1 bad publicity" :effect (effect (gain :corp :bad-publicity 1))}}}
@@ -184,6 +191,9 @@
                                      :msg (msg "trash " (:title target)) :effect (effect (trash target))}
                                     card nil)))}
 
+   "Predictive Algorithm"
+   {:events {:pre-steal-cost {:effect (effect (steal-cost-bonus [:credit 2]))}}}
+
    "Psychographics"
    {:req (req tagged) :choices :credit :prompt "How many credits?"
     :effect (req (let [c (min target (:tag runner))]
@@ -217,7 +227,7 @@
 
    "Reuse"
    {:choices {:max 100 :req #(and (:side % "Corp") (= (:zone %) [:hand]))}
-    :msg (msg "trash " (join ", " (map :title targets)) " and gain " (* 2 (count targets)) " [Credits]")
+    :msg (msg "trash " (count targets) " card" (if (not= 1 (count targets)) "s") " and gain " (* 2 (count targets)) " [Credits]")
     :effect (effect (trash-cards targets) (gain :credit (* 2 (count targets))))}
 
    "Rework"

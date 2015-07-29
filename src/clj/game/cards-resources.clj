@@ -424,8 +424,9 @@
                  :effect (effect (host card target)) :msg (msg "host " (:title target) "")}]
     :events {:runner-turn-begins
              {:prompt "Choose a card on The Supplier to install"
-              :choices (req (conj (filter #(<= (- (or (:cost %) 0) 2) (:credit runner)) (:hosted card))
-                                  "No install"))
+              :choices (req (let [hosted (filter #(<= (- (or (:cost %) 0) 2) (:credit runner)) (:hosted card))]
+                              (if (empty? hosted)
+                                hosted (conj hosted "No install"))))
               :req (req (not (string? target)))
               :msg (msg "install " (:title target) " lowering its install cost by 2")
               :effect (effect (gain :credit (min 2 (:cost target))) (runner-install target))}}}
@@ -435,7 +436,8 @@
     :leave-play (effect (update-all-advancement-costs))
     :events {:agenda-scored {:effect (effect (trash card))}
              :agenda-stolen {:effect (effect (trash card))}
-             :pre-advancement-cost {:effect (effect (advancement-cost-bonus 1))}}}
+             :pre-advancement-cost {:effect (effect (advancement-cost-bonus 1))}
+             :pre-steal-cost {:effect (effect (steal-cost-bonus [:credit 3]))}}}
 
    "Theophilius Bagbiter"
    {:effect (req (lose state :runner :credit :all)

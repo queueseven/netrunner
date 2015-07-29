@@ -361,8 +361,7 @@
 
    "Stimhack"
    {:prompt "Choose a server" :choices (req servers)
-    :effect (effect (gain :credit 9)
-                    (gain :run-credit 9)
+    :effect (effect (gain :run-credit 9)
                     (run target {:end-run
                                  {:msg " take 1 brain damage"
                                   :effect (effect (damage :brain 1 {:unpreventable true :card card}))}}
@@ -389,7 +388,8 @@
                                (get-in runner [:rig :program])))
                :msg (msg "move " (:title target) " on top of Stack")
                :effect (req (move state side (some #(when (= (:cid target) (:cid %)) %)
-                                                   (get-in runner [:rig :program])) :deck true))}}
+                                                   (get-in runner [:rig :program]))
+                                  :deck {:front true}))}}
              card targets))}
 
    "The Makers Eye"

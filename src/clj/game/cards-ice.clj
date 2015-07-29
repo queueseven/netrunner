@@ -490,7 +490,18 @@
                 {:label "Trace 2 - Do 2 net damage"
                  :trace {:base 2 :msg "do 2 net damage" :effect (effect (damage :net 2 {:card card}))}}
                 {:label "Trace 3 - Do 3 net damage"
-                 :trace {:base 3 :msg "do 3 net damage" :effect (effect (damage :net 3 {:card card}))}}]}
+                 :trace {:base 3 :msg "do 3 net damage and end the run"
+                         :effect (effect (damage :net 3 {:card card}) (end-run))}}]}
+
+   "Shiro"
+   {:abilities [{:label "Rearrange the top 3 cards of R&D"
+                 :msg "rearrange the top 3 cards of R&D"
+                 :effect (req (doseq [c (take 3 (:deck corp))]
+                                (move state side c :play-area)))}
+                {:label "Force the Runner to access the top card of R&D"
+                 :effect (req (doseq [c (take (get-in @state [:runner :rd-access]) (:deck corp))]
+                                (system-msg state :runner (str "accesses " (:title c)))
+                                (handle-access state side [c])))}]}
 
    "Snoop"
    {:abilities [{:msg "place 1 power counter on Snoop" :effect (effect (add-prop card :counter 1))}
@@ -538,11 +549,12 @@
                 {:msg "end the run" :effect (effect (end-run))}]}
 
    "Troll"
-   {:abilities [{:player :runner :prompt "Choose one" :choices ["Lose [Click]" "End the run"]
-                 :label "Force the Runner to lose [Click] or end the run"
-                 :effect (req (if-not (and (= target "Lose [Click]") (pay state side card :click 1))
-                                (do (end-run state side) (system-msg state side "ends the run"))
-                                (system-msg state side "loses [Click]")))}]}
+   {:abilities [{:label "Trace 2 - Force the runner to lose [Click] or end the run"
+                 :trace {:base 2 :player :runner
+                         :prompt "Choose one" :choices ["Lose [Click]" "End the run"]
+                         :effect (req (if-not (and (= target "Lose [Click]") (pay state side card :click 1))
+                                        (do (end-run state side) (system-msg state side "ends the run"))
+                                        (system-msg state side "loses [Click]")))}}]}
 
    "Tsurugi"
    {:abilities [{:msg "end the run" :effect (effect (end-run))}

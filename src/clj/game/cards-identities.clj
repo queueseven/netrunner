@@ -39,8 +39,10 @@
 
    "Edward Kim: Humanitys Hammer"
    {:effect (effect (gain :link 1))
-    :events {:access {:req (req (= (:type target) "Operation")) :once :per-turn
-                      :msg (msg "trash " (:title target)) :effect (effect (trash target))}}}
+    :events {:access {:once :per-turn
+                      :req (req (= (:type target) "Operation"))
+                      :effect (effect (trash target))
+                      :msg (msg "trash " (:title target) (if (some #{:discard} (:zone target)) ", but it is already trashed."))}}}
 
    "Exile: Streethawk"
    {:effect (effect (gain :link 1))
@@ -123,10 +125,13 @@
 
    "Kate \"Mac\" McCaffrey: Digital Tinker"
    {:effect (effect (gain :link 1))
-    :events {:pre-install {:once :per-turn
-                           :req (req (some #(= % (:type target)) '("Hardware" "Program")))
-                           :msg (msg "reduce the install cost of " (:title target) " by 1 [Credits]")
-                           :effect (effect (install-cost-bonus -1))}}}
+    :events {:pre-install {:req (req (and (#{"Hardware" "Program"} (:type target))
+                                          (not (get-in @state [:per-turn (:cid card)]))))
+                           :effect (effect (install-cost-bonus -1))}  
+             :runner-install {:req (req (and (#{"Hardware" "Program"} (:type target))
+                                             (not (get-in @state [:per-turn (:cid card)]))))
+                              :msg (msg "reduce the install cost of " (:title target) " by 1 [Credits]")
+                              :effect (req (swap! state assoc-in [:per-turn (:cid card)] true))}}}
 
    "Ken \"Express\" Tenma: Disappeared Clone"
    {:events {:play-event {:req (req (has? target :subtype "Run")) :once :per-turn
