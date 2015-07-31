@@ -29,29 +29,14 @@
         scored (get-in @state [side :scored])]
     (if (and (every?
                (fn [[attr cost]]
-                 (if (and (= side :runner) (= attr :cost))
-                   (>= (- (+ (get-in @state [:runner :credit]) (get-in @state [:runner :run-credit])) cost) 0)
-                   (>= (- (get-in @state [side attr]) cost) 0)))
+                 (>= (- (get-in @state [side attr]) cost) 0))
                costs)
              (or (not forfeit-cost) (not (empty? scored))))
       {:costs costs, :forfeit-cost forfeit-cost, :scored scored}
     )))
 
-(defn lose-credit [state side cost]
-  (if (= side :runner)
-    (swap! state
-      (fn [old-state]
-        (let [run-credit-to-use (min (get-in old-state [:runner :run-credit]) cost)
-              cost-remaining (- cost run-credit-to-use)]
-          (-> old-state
-            (update-in [:runner :run-credit] - run-credit-to-use)
-            (update-in [:runner :credit] - cost-remaining)))))
-    (swap! state update-in [:corp :credit] #(- % cost))))
-
 (defn apply-loss [state side [attr value]]
-  (if (= attr :credit)
-    (lose-credit state side value)
-    (swap! state update-in [side attr] #(- (or % 0) value))))
+  (swap! state update-in [side attr] #(- (or % 0) value)))
 
 (defn pay [state side card & args]
   (when-let [{:keys [costs forfeit-cost scored]} (apply can-pay? state side args)]
@@ -192,10 +177,12 @@
 (defn draw
   ([state side] (draw state side 1))
   ([state side n]
-     (let [drawn (zone :hand (take n (get-in @state [side :deck])))]
-       (swap! state update-in [side :hand] #(concat % drawn)))
-     (swap! state update-in [side :deck] (partial drop n))
-     (trigger-event state side (if (= side :corp) :corp-draw :runner-draw) n)))
+   (let [active-player (get-in @state [:active-player])]
+     (when-not (get-in @state [active-player :register :cannot-draw])
+       (let [drawn (zone :hand (take n (get-in @state [side :deck])))]
+         (swap! state update-in [side :hand] #(concat % drawn)))
+       (swap! state update-in [side :deck] (partial drop n))
+       (trigger-event state side (if (= side :corp) :corp-draw :runner-draw) n)))))
 
 (defn mill
   ([state side] (mill state side 1))
@@ -1001,7 +988,9 @@
 
 (defn host
   ([state side card target] (host state side card target nil))
-  ([state side card {:keys [zone cid host] :as target} {:keys [facedown] :as options}]
+  ([state side card {:keys [zone cid host installed] :as target} {:keys [facedown] :as options}]
+   (when installed
+     (unregister-events state side target))
    (doseq [s [:runner :corp]]
      (if host
        (when-let [host-card (some #(when (= (:cid host) (:cid %)) %)
@@ -1015,6 +1004,8 @@
                          :facedown facedown
                          :zone '(:onhost))] ;; hosted cards should not be in :discard or :hand etc
      (update! state side (update-in card [:hosted] #(conj % c)))
+     (when-let [events (:events (card-def target))]
+       (register-events state side events c))
      c)))
 
 (defn runner-install
@@ -1158,6 +1149,9 @@
 (defn prevent-run [state side]
   (swap! state assoc-in [:runner :register :cannot-run] true))
 
+(defn prevent-draw [state side]
+  (swap! state assoc-in [:runner :register :cannot-draw] true))
+
 (defn prevent-jack-out [state side]
   (swap! state assoc-in [:run :cannot-jack-out] true))
 
@@ -1185,7 +1179,7 @@
     (run state side server)))
 
 (defn click-draw [state side args]
-  (when (pay state side nil :click 1)
+  (when (and (not (get-in @state [side :register :cannot-draw])) (pay state side nil :click 1))
     (system-msg state side "spends [Click] to draw a card")
     (draw state side)
     (trigger-event state side (if (= side :corp) :corp-click-draw :runner-click-draw))))
