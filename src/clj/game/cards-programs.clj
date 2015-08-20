@@ -70,6 +70,15 @@
    "D4v1d"
    {:data {:counter 3} :abilities [{:counter-cost 1 :msg "break 1 subroutine"}]}
 
+   "DaVinci"
+   {:events {:successful-run {:effect (effect (add-prop card :counter 1))}}
+    :abilities [{:prompt "Choose a card to install"
+                 :choices (req (filter #(and (<= (:cost %) (:counter card))
+                                             (#{"Hardware" "Program" "Resource"} (:type %)))
+                                       (:hand runner)))
+                 :msg (msg "install " (:title target) " at no cost")
+                 :effect (effect (trash card) (runner-install target {:no-cost true}))}]}
+
    "Datasucker"
    {:events (let [ds {:effect (req (update! state side (dissoc card :datasucker-count)))}]
               {:successful-run {:effect (effect (add-prop card :counter 1))
@@ -93,7 +102,7 @@
 
    "Djinn"
    {:abilities [{:label "Add a virus program to your Grip from your Stack"
-                 :prompt "Choose a Virus" :msg (msg "adds " (:title target) " to his Grip")
+                 :prompt "Choose a Virus" :msg (msg "adds " (:title target) " to their Grip")
                  :choices (req (filter #(and (= (:type %) "Program")
                                              (has? % :subtype "Virus"))
                                        (:deck runner)))
@@ -104,7 +113,7 @@
                                              (not (has? % :subtype "Icebreaker"))
                                              (<= (:cost %) (:credit runner)))
                                        (:hand runner)))
-                 :msg (msg "install and host" (:title target))
+                 :msg (msg "install and host " (:title target))
                  :effect (effect (gain :memory (:memoryunits target))
                                  (runner-install target {:host-card card}))}
                 {:label "Host an installed non-Icebreaker program on Djinn"
@@ -228,17 +237,17 @@
 
    "Medium"
    {:events
-    {:successful-run
-     {:req (req (= target :rd))
-      :effect (effect (add-prop card :counter 1)
-                      (access-bonus (max 0 (dec (get-virus-counters state side (get-card state card))))))}}}
+    {:successful-run {:req (req (= target :rd))
+                      :effect (effect (add-prop card :counter 1))}
+     :pre-access {:req (req (= target :rd))
+                  :effect (effect (access-bonus (max 0 (dec (get-virus-counters state side (get-card state card))))))}}}
 
    "Nerve Agent"
    {:events
-    {:successful-run
-     {:req (req (= target :hq))
-      :effect (effect (add-prop card :counter 1)
-                      (access-bonus (max 0 (dec (get-virus-counters state side (get-card state card))))))}}}
+    {:successful-run {:req (req (= target :hq))
+                      :effect (effect (add-prop card :counter 1))}
+     :pre-access {:req (req (= target :hq))
+                  :effect (effect (access-bonus (max 0 (dec (get-virus-counters state side (get-card state card))))))}}}
 
    "Net Shield"
    {:prevent {:damage [:net]}
@@ -253,11 +262,16 @@
                               (dec (* 2 (count (filter #(= (:title %) "Origami")
                                                        (all-installed state :runner)))))))}
 
-
    "Paintbrush"
-   {:abilities [{:cost [:click 1] :msg (msg "give " (:title target)
-                                            " sentry, code gate or barrier until the end of next run this turn")
-                 :choices {:req #(and (= (first (:zone %)) :servers) (has? % :type "ICE") (:rezzed %))}}]}
+   {:abilities [{:cost [:click 1]
+                 :choices {:req #(and (= (first (:zone %)) :servers) (has? % :type "ICE") (:rezzed %))}
+                 :effect (req (let [ice target]
+                           (resolve-ability
+                              state :runner
+                              {:prompt (msg "Choose a type") 
+                               :choices ["sentry" "code gate" "barrier"]
+                               :msg (msg "give " (:title ice) " " target " until the end of next run this turn")}
+                              card nil)))}]}
 
    "Parasite"
    {:hosting {:req #(and (= (:type %) "ICE") (:rezzed %))}
@@ -330,8 +344,8 @@
                                       (not (some (fn [c] (has? c :subtype "Caïssa")) (:hosted %))))}
                  :msg (msg "host it on " (if (:rezzed target) (:title target) "a piece of ICE"))
                  :effect (effect (host target card))}]
-    :events {:pre-rez {:req (req (= (:zone (:host card)) (:zone target)))
-                       :effect (effect (rez-cost-bonus 2))}}}
+    :events {:pre-rez-cost {:req (req (= (:zone (:host card)) (:zone target)))
+                            :effect (effect (rez-cost-bonus 2))}}}
 
    "Sahasrara"
    {:recurring 2}
@@ -376,4 +390,11 @@
                  :effect (effect (expose current-ice)
                                  (resolve-ability {:optional {:prompt "Jack out?" :msg "jack out"
                                                               :effect (effect (jack-out nil))}}
-                                                  card nil))}]}})
+                                                  card nil))}]}
+   "Trope"
+   {:events {:runner-turn-begins {:effect (effect (add-prop card :counter 1))}}
+    :abilities [{:label "Remove Trope from the game to reshuffle cards from Heap back into Stack"
+                 :cost [:click 1] :msg (msg "reshuffle " (:counter card) " card" (when (> (:counter card) 1) "s")
+                                            " in the Heap back into their Stack")
+                 :effect (effect (move card :rfg))}]}
+})

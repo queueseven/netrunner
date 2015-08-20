@@ -27,16 +27,14 @@
   (let [costs (merge-costs (remove #(or (nil? %) (= % [:forfeit])) args))
         forfeit-cost (some #{[:forfeit] :forfeit} args)
         scored (get-in @state [side :scored])]
-    (if (and (every?
-               (fn [[attr cost]]
-                 (>= (- (get-in @state [side attr]) cost) 0))
-               costs)
+    (if (and (every? #(>= (- (get-in @state [side (first %)]) (last %)) 0) costs)
              (or (not forfeit-cost) (not (empty? scored))))
-      {:costs costs, :forfeit-cost forfeit-cost, :scored scored}
-    )))
+      {:costs costs, :forfeit-cost forfeit-cost, :scored scored})))
 
-(defn apply-loss [state side [attr value]]
-  (swap! state update-in [side attr] #(- (or % 0) value)))
+(defn deduce [state side [attr value]]
+  (swap! state update-in [side attr] #(max 0 (- % value)))
+  (when (and (= attr :credit) (= side :runner) (get-in @state [:runner :run-credit]))
+    (swap! state update-in [:runner :run-credit] #(max 0 (- % value)))))
 
 (defn pay [state side card & args]
   (when-let [{:keys [costs forfeit-cost scored]} (apply can-pay? state side args)]
@@ -51,7 +49,7 @@
              (when (= (first c) :click)
                (trigger-event state side (if (= side :corp) :corp-spent-click :runner-spent-click) nil)
                (swap! state assoc-in [side :register :spent-click] true))
-             (apply-loss state side c))))))
+             (deduce state side c))))))
 
 (defn gain [state side & args]
   (doseq [r (partition 2 args)]
@@ -62,16 +60,27 @@
     (trigger-event state side (if (= side :corp) :corp-loss :runner-loss) r)
     (if (= (last r) :all)
       (swap! state assoc-in [side (first r)] 0)
-      (apply-loss state side r))))
+      (deduce state side r))))
+
+(defn register-suppress [state side events card]
+  (doseq [e events]
+    (swap! state update-in [:suppress (first e)] #(conj % {:ability (last e) :card card}))))
 
 (defn register-events [state side events card]
   (doseq [e events]
-    (swap! state update-in [:events (first e)] #(conj % {:ability (last e) :card card}))))
+    (swap! state update-in [:events (first e)] #(conj % {:ability (last e) :card card})))
+  (register-suppress state side (:suppress (card-def card)) card))
+
+(defn unregister-suppress [state side card]
+  (doseq [e (:suppress (card-def card))]
+    (swap! state update-in [:suppress (first e)]
+           #(remove (fn [effect] (= (get-in effect [:card :cid]) (:cid card))) %))))
 
 (defn unregister-events [state side card]
   (doseq [e (:events (card-def card))]
     (swap! state update-in [:events (first e)]
-           #(remove (fn [effect] (= (get-in effect [:card :cid]) (:cid card))) %))))
+           #(remove (fn [effect] (= (get-in effect [:card :cid]) (:cid card))) %)))
+  (unregister-suppress state side card))
 
 (defn desactivate
   ([state side card] (desactivate state side card nil))
@@ -80,7 +89,7 @@
          c (if (= (:side c) "Runner") (dissoc c :installed :counter :rec-counter :pump) c)
          c (if keep-counter c (dissoc c :counter :rec-counter :advance-counter))]
      (when-let [leave-effect (:leave-play (card-def card))]
-       (when (or (= (:side card) "Runner") (:rezzed card))
+       (when (or (= (:side card) "Runner") (:rezzed card) (= (first (:zone card)) :current))
          (leave-effect state side card nil)))
      (when-let [prevent (:prevent (card-def card))]
        (doseq [[ptype pvec] prevent]
@@ -91,14 +100,16 @@
        (gain state :runner :memory mu))
      c)))
 
-(defn get-card [state {:keys [cid zone side host] :as card}]
-  (if zone
-    (if host
-      (let [h (get-card state host)]
-        (some #(when (= cid (:cid %)) %) (:hosted h)))
-      (some #(when (= cid (:cid %)) %)
-            (get-in @state (cons (to-keyword side) (map to-keyword zone)))))
-    card))
+(defn get-card [state {:keys [cid zone side host type] :as card}]
+  (if (= type "Identity")
+    (get-in @state [(to-keyword side) :identity])
+    (if zone
+      (if host
+        (let [h (get-card state host)]
+          (some #(when (= cid (:cid %)) %) (:hosted h)))
+        (some #(when (= cid (:cid %)) %)
+              (get-in @state (cons (to-keyword side) (map to-keyword zone)))))
+      card)))
 
 (defn update! [state side {:keys [type zone cid host] :as card}]
   (if (= type "Identity")
@@ -131,7 +142,7 @@
        (let [dest (if (sequential? to) (vec to) [to])
              c (if (and (= side :corp) (= (first dest) :discard) (:rezzed card))
                  (assoc card :seen true) card)
-             c (if (and (or installed (#{:servers :scored :current} (first zone)))
+             c (if (and (or installed host (#{:servers :scored :current} (first zone)))
                         (#{:hand :deck :discard} (first dest)))
                  (desactivate state side c) c)
              moved-card (assoc c :zone dest :host nil :hosted nil :previous-zone (:zone c))]
@@ -161,7 +172,10 @@
                           (fn [i s]
                             (if (< i n) s
                                 {:content (vec (for [c (:content s)]
-                                                 (update-in c [:zone] #(assoc (vec %) 2 i))))
+                                                 (let [c (update-in c [:zone] #(assoc (vec %) 2 i))]
+                                                   (assoc c :hosted
+                                                            (for [h (:hosted c)]
+                                                               (assoc-in h [:host :zone] (:zone c)))))))
                                  :ices (vec (for [c (:ices s)]
                                               (update-in c [:zone] #(assoc (vec %) 2 i))))}))
                           (get-in @state [:corp :servers :remote]))))
@@ -170,7 +184,11 @@
                (when (:rezzed c)
                  (when-let [events (:events (card-def c))]
                    (unregister-events state side c)
-                   (register-events state side events c))))))
+                   (register-events state side events c)))
+               (doseq [h (:hosted c)]
+                 (when-let [events (:events (card-def h))]
+                   (unregister-events state side h)
+                   (register-events state side events h))))))
          (trigger-event state side :card-moved card moved-card)
          moved-card)))))
 
@@ -195,13 +213,15 @@
 
 (defn show-prompt
   ([state side card msg choices f] (show-prompt state side card msg choices f nil))
-  ([state side card msg choices f priority]
+  ([state side card msg choices f {:keys [priority prompt-type show-discard] :as args}]
    (let [prompt (if (string? msg) msg (msg state side card nil))]
      (when (or (:number choices) (#{:credit :counter} choices) (> (count choices) 0))
        (swap! state update-in [side :prompt]
               (if priority
-                #(cons {:msg prompt :choices choices :effect f :card card} (vec %))
-                #(conj (vec %) {:msg prompt :choices choices :effect f :card card})))))))
+                #(cons {:msg prompt :choices choices :effect f :card card
+                        :prompt-type prompt-type :show-discard show-discard} (vec %))
+                #(conj (vec %) {:msg prompt :choices choices :effect f :card card
+                                :prompt-type prompt-type :show-discard show-discard})))))))
 
 (defn resolve-psi [state side card psi bet]
   (swap! state assoc-in [:psi side] bet)
@@ -224,8 +244,8 @@
 
 (defn prompt!
   ([state side card msg choices ability] (prompt! state side card msg choices ability nil))
-  ([state side card msg choices ability priority]
-    (show-prompt state side card msg choices #(resolve-ability state side ability card [%]) priority)))
+  ([state side card msg choices ability {:keys [priority prompt-type] :as args}]
+    (show-prompt state side card msg choices #(resolve-ability state side ability card [%]) args)))
 
 (defn optional-ability [state side card msg ability targets]
   (show-prompt state side card msg ["Yes" "No"] #(if (= % "Yes")
@@ -267,7 +287,7 @@
 
 (defn show-select
   ([state side card ability] (show-select state side card ability nil))
-  ([state side card ability priority]
+  ([state side card ability {:keys [priority] :as args}]
    (let [ability (update-in ability [:choices :max] #(if (fn? %) (% state side card nil) %))]
      (swap! state update-in [side :selected]
             #(conj (vec %) {:ability (dissoc ability :choices) :req (get-in ability [:choices :req])
@@ -278,7 +298,8 @@
                     (if-let [m (get-in ability [:choices :max])]
                       (str "Select up to " m " targets for " (:title card))
                       (str "Select a target for " (:title card))))
-                  ["Done"] (fn [choice] (resolve-select state side)) priority))))
+                  ["Done"] (fn [choice] (resolve-select state side))
+                  (assoc args :prompt-type :select :show-discard (:show-discard ability))))))
 
 (defn resolve-ability [state side {:keys [counter-cost advance-counter-cost cost effect msg req once
                                           once-key optional prompt choices end-turn player psi trace
@@ -299,7 +320,7 @@
       (if choices
         (if (map? choices)
           (if (:req choices)
-            (show-select state (or player side) card ability priority)
+            (show-select state (or player side) card ability {:priority priority})
             (let [n ((:number choices) state side card targets)]
               (prompt! state (or player side) card prompt {:number n} (dissoc ability :choices))))
           (let [cs (if-not (fn? choices)
@@ -307,7 +328,7 @@
                      (let [cards (choices state side card targets)]
                              (if not-distinct
                                cards (distinct-by :title cards))))]
-            (prompt! state (or player side) card prompt cs (dissoc ability :choices) priority)))
+            (prompt! state (or player side) card prompt cs (dissoc ability :choices) {:priority priority})))
         (when (and (or (not counter-cost) (<= counter-cost (or counter 0)))
                    (or (not advance-counter-cost) (<= advance-counter-cost (or advance-counter 0)))
                    (apply pay (concat [state side card] cost)))
@@ -327,9 +348,6 @@
                      #(conj % {:ability end-turn :card card :targets targets}))))
           (when once (swap! state assoc-in [once (or once-key cid)] true)))))))
 
-(defn return-run-credit [state]
-  (swap! state assoc-in [:runner :run-credit] 0))
-
 (defn handle-end-run [state side]
   (if-not (empty? (get-in @state [:runner :prompt]))
     (swap! state assoc-in [:run :ended] true)
@@ -348,7 +366,8 @@
           (let [run-effect (get-in @state [:run :run-effect])]
             (when-let [end-run-effect (:end-run run-effect)]
               (resolve-ability state side end-run-effect (:card run-effect) [(first server)]))))
-        (return-run-credit state)
+        (swap! state update-in [:runner :credit] - (get-in @state [:runner :run-credit]))
+        (swap! state assoc-in [:runner :run-credit] 0)
         (swap! state assoc :run nil))))
 
 (defn add-prop [state side card key n]
@@ -370,8 +389,8 @@
       (pay state side card :credit choice))
     (when (= (:choices prompt) :counter)
       (add-prop state side (:card prompt) :counter (- choice)))
-    (swap! state update-in [side :prompt] (fn [pr] (filter #(not= % prompt) pr)))
     ((:effect prompt) (or choice card))
+    (swap! state update-in [side :prompt] (fn [pr] (filter #(not= % prompt) pr)))
     (when (empty? (get-in @state [:runner :prompt]))
       (when-let [run (:run @state)]
         (when (:ended run)
@@ -399,14 +418,20 @@
           (when (= (count (:cards selected)) (or (:max selected) 1))
             (resolve-select state side)))))))
 
+(defn trigger-suppress [state side event & targets]
+  (reduce #(or %1 ((:req (:ability %2)) state side (:card %2) targets)) false (get-in @state [:suppress event])))
+
 (defn trigger-event [state side event & targets]
   (doseq [{:keys [ability] :as e} (get-in @state [:events event])]
     (when-let [card (get-card state (:card e))]
-      (when (or (not (:req ability)) ((:req ability) state side card targets))
+      (when (and (not (apply trigger-suppress state side event (cons card targets)))
+                 (or (not (:req ability)) ((:req ability) state side card targets)))
         (resolve-ability state side ability card targets))))
   (swap! state update-in [:turn-events] #(cons [event targets] %)))
 
-(defn card-init [state side card]
+(defn card-init
+  ([state side card] (card-init state side card true))
+  ([state side card resolve]
   (let [cdef (card-def card)
         abilities (if (:recurring cdef)
                     (conj (:abilities cdef) {:msg "Take 1 [Recurring Credits]"})
@@ -431,8 +456,9 @@
     (update! state side c)
     (when-let [events (:events cdef)]
       (register-events state side events c))
-    (resolve-ability state side cdef c nil)
-    (get-card state c)))
+    (when resolve
+      (resolve-ability state side cdef c nil))
+    (get-card state c))))
 
 (defn ice-strength-bonus [state side n]
   (swap! state update-in [:bonus :ice-strength] (fnil #(+ % n) 0)))
@@ -543,7 +569,9 @@
 
 (defn change [state side {:keys [key delta]}]
   (let [kw (to-keyword key)]
-    (swap! state update-in [side kw] (partial + delta))
+    (if (< delta 0)
+      (deduce state side [kw (- delta)])
+      (swap! state update-in [side kw] (partial + delta)))
     (system-msg state side
                 (str "sets " (.replace key "-" " ") " to " (get-in @state [side kw])
                      " (" (if (> delta 0) (str "+" delta) delta) ")"))))
@@ -577,7 +605,7 @@
                          :discard [] :scored [] :rfg [] :play-area []
                          :rig {:program [] :resource [] :hardware []}
                          :click 0 :credit 5 :run-credit 0 :memory 4 :link 0 :tag 0 :agenda-point 0 :max-hand-size 5
-                         :hq-access 1 :rd-access 1
+                         :hq-access 1 :rd-access 1 :tagged 0
                          :brain-damage 0 :click-per-turn 4 :agenda-point-req 7 :keep false}})]
     (card-init state :corp corp-identity)
     (card-init state :runner runner-identity)
@@ -607,7 +635,7 @@
 
 (defn keep-hand [state side args]
   (swap! state assoc-in [side :keep] true)
-  (system-msg state side "keeps his or her hand")
+  (system-msg state side "keeps their hand")
   (trigger-event state side :pre-first-turn))
 
 (defn gain-agenda-point [state side n]
@@ -738,9 +766,9 @@
       "New remote" [:servers :remote (count (get-in @state [:corp :servers :remote]))]
       [:servers :remote (-> (split server #" ") last Integer/parseInt)])))
 
-(defn add-bad-publicity-credit [state]
-  (swap! state update-in [:runner :run-credit] + (get-in @state [:corp :bad-publicity]))
-  (swap! state update-in [:runner :credit] + (get-in @state [:corp :bad-publicity])))
+(defn gain-run-credits [state side n]
+  (swap! state update-in [:runner :run-credit] + n)
+  (gain state :runner :credit n))
 
 (defn run
   ([state side server] (run state side server nil nil))
@@ -756,7 +784,7 @@
          (swap! state assoc :per-run nil
                 :run {:server s :position (count ices) :ices ices :access-bonus 0
                       :run-effect (assoc run-effect :card card)})
-         (add-bad-publicity-credit state)
+         (gain-run-credits state side (get-in @state [:corp :bad-publicity]))
          (swap! state update-in [:runner :register :made-run] #(conj % (first s)))
          (trigger-event state :runner :run s)))))
 
@@ -780,6 +808,7 @@
       (when-let [name (:title c)]
         (when-let [access-effect (:access cdef)]
           (resolve-ability state (to-keyword (:side c)) access-effect c nil))
+        (trigger-event state side :access c)
         (when (not= (:zone c) [:discard])
           (trigger-event state side :pre-trash c)
           (if-let [trash-cost (trash-cost state side c)]
@@ -793,17 +822,17 @@
               (prompt! state :runner c (str "You accessed " (:title c)) ["OK"] {}))))
         (when (= (:type c) "Agenda")
           (trigger-event state side :pre-steal-cost c)
-          (let [cost (steal-cost state side c)]
-            (prn (pr-str cost))
-            (if (pos? (count cost))
-              (optional-ability state :runner c (str "Pay " (costs-to-symbol cost) " to steal " name "?")
-                                {:cost cost
-                                 :effect (effect (system-msg (str "pays " (costs-to-symbol cost)
-                                                                  " to steal " (:title c)))
-                                                 (steal c))} nil)
-              (when (or (not (:steal-req cdef)) ((:steal-req cdef) state :runner c nil))
-                (steal state :runner c)))))
-        (trigger-event state side :access c)))))
+          (if (not (get-in @state [:runner :register :cannot-steal]))
+            (let [cost (steal-cost state side c)]
+              (if (pos? (count cost))
+                (optional-ability state :runner c (str "Pay " (costs-to-symbol cost) " to steal " name "?")
+                                  {:cost cost
+                                   :effect (effect (system-msg (str "pays " (costs-to-symbol cost)
+                                                                    " to steal " (:title c)))
+                                                   (steal c))} nil)
+                (when (or (not (:steal-req cdef)) ((:steal-req cdef) state :runner c nil))
+                  (steal state :runner c))))
+            (prompt! state :runner c (str "You accessed but cannot steal " (:title c)) ["OK"] {})))))))
 
 (defn max-access [state side n]
   (swap! state assoc-in [:run :max-access] n))
@@ -815,6 +844,158 @@
       (min max-access accesses) accesses)))
 
 (defmulti access (fn [state side server] (first server)))
+(defmulti choose-access (fn [cards server] (first server)))
+
+(defn access-helper-remote [cards]
+  {:prompt "Click a card to access it. You must access all cards in this server."
+   :choices {:req #(some (fn [c] (= (:cid %) (:cid c))) cards)}
+   :effect (req (handle-access state side [target])
+                (when (< 1 (count cards))
+                  (resolve-ability state side (access-helper-remote (filter #(not= (:cid %) (:cid target)) cards))
+                                   card nil)))})
+
+(defmethod choose-access :remote [cards server]
+  {:effect (req (if (>= 1 (count cards))
+                  (handle-access state side cards)
+                  (resolve-ability state side (access-helper-remote cards) card nil)))})
+
+(defn access-helper-hq [cards]
+  {:prompt "Select a card to access."
+   :choices (concat (when (some #(= (first (:zone %)) :hand) cards) ["Card from hand"])
+                    (map #(if (:rezzed %) (:title %) "Unrezzed upgrade in HQ")
+                         (filter #(= (last (:zone %)) :content) cards)))
+   :effect (req (case target
+                "Unrezzed upgrade in HQ"
+                  ; accessing an unrezzed upgrade
+                  (let [unrezzed (filter #(and (= (last (:zone %)) :content) (not (:rezzed %))) cards)]
+                    (if (= 1 (count unrezzed))
+                      ; only one unrezzed upgrade; access it and continue
+                      (do (system-msg state side (str "accesses " (:title (first unrezzed))))
+                          (handle-access state side unrezzed)
+                          (when (< 1 (count cards))
+                            (resolve-ability
+                              state side (access-helper-hq (filter #(not= (:cid %) (:cid (first unrezzed))) cards))
+                              card nil)))
+                    ; more than one unrezzed upgrade. allow user to select with mouse.
+                    (resolve-ability state side
+                                     {:prompt "Choose an upgrade in HQ to access."
+                                      :choices {:req #(= (second (:zone %)) :hq)}
+                                      :effect (effect (system-msg (str "accesses " (:title target)))
+                                                      (handle-access [target])
+                                                      (resolve-ability (access-helper-hq
+                                                                         (remove-once #(not= (:cid %) (:cid target))
+                                                                                      cards)) card nil))} card nil)))
+                  ; accessing a card in hand or a rezzed upgade
+                  "Card from hand"
+                  (do (system-msg state side (str "accesses " (:title (first cards))))
+                      (handle-access state side [(first cards)])
+                      (when (< 1 (count cards))
+                        (resolve-ability state side (access-helper-hq (rest cards)) card nil)))
+                  ; accessing a rezzed upgrade
+                  (do (system-msg state side (str "accesses " target))
+                      (handle-access state side [(some #(when (= (:title %) target) %) cards)])
+                      (when (< 1 (count cards))
+                        (resolve-ability state side (access-helper-hq
+                                                      (remove-once #(not= (:title %) target) cards)) card nil)))))})
+
+(defmethod choose-access :hq [cards server]
+  {:effect (req (if (pos? (count cards))
+                  (if (= 1 (count cards))
+                    (do (when (pos? (count cards)) (system-msg state side (str "accesses " (:title (first cards)))))
+                      (handle-access state side cards))
+                    (resolve-ability state side (access-helper-hq cards) card nil))))})
+
+(defn access-helper-rd [cards]
+  {:prompt "Select a card to access."
+   :choices (concat (when (some #(= (first (:zone %)) :deck) cards) ["Card from deck"])
+                    (map #(if (:rezzed %) (:title %) "Unrezzed upgrade in R&D")
+                         (filter #(= (last (:zone %)) :content) cards)))
+   :effect (req (case target
+                  "Unrezzed upgrade in R&D"
+                  ; accessing an unrezzed upgrade
+                  (let [unrezzed (filter #(and (= (last (:zone %)) :content) (not (:rezzed %))) cards)]
+                    (if (= 1 (count unrezzed))
+                      ; only one unrezzed upgrade; access it and continue
+                      (do (handle-access state side unrezzed)
+                          (when (< 1 (count cards))
+                            (resolve-ability
+                              state side (access-helper-rd (filter #(not= (:cid %) (:cid (first unrezzed))) cards))
+                              card nil)))
+                      ; more than one unrezzed upgrade. allow user to select with mouse.
+                      (resolve-ability state side
+                                       {:prompt "Choose an upgrade in R&D to access."
+                                        :choices {:req #(= (second (:zone %)) :rd)}
+                                        :effect (effect (handle-access [target])
+                                                        (resolve-ability (access-helper-rd
+                                                                           (remove-once #(not= (:cid %) (:cid target))
+                                                                                        cards)) card nil))} card nil)))
+                  ; accessing a card in deck or a rezzed upgade
+                  "Card from deck"
+                  (do (handle-access state side [(first cards)])
+                      (when (< 1 (count cards))
+                        (resolve-ability state side (access-helper-rd (rest cards)) card nil)))
+                  ; accessing a rezzed upgrade
+                  (do (handle-access state side [(some #(when (= (:title %) target) %) cards)])
+                      (when (< 1 (count cards))
+                        (resolve-ability state side (access-helper-rd
+                                                      (remove-once #(not= (:title %) target) cards)) card nil)))))})
+
+(defmethod choose-access :rd [cards server]
+  {:effect (req (if (pos? (count cards))
+                  (if (= 1 (count cards))
+                    (handle-access state side cards)
+                    (resolve-ability state side (access-helper-rd cards) card nil))))})
+
+(defn access-helper-archives [cards]
+  {:prompt "Select a card to access. You must access all cards."
+   :choices (map #(if (= (last (:zone %)) :content)
+                   (if (:rezzed %) (:title %) "Unrezzed upgrade in Archives")
+                   (:title %)) cards)
+   :effect (req (case target
+                  "Unrezzed upgrade in Archives"
+                  ; accessing an unrezzed upgrade
+                  (let [unrezzed (filter #(and (= (last (:zone %)) :content) (not (:rezzed %))) cards)]
+                    (if (= 1 (count unrezzed))
+                      ; only one unrezzed upgrade; access it and continue
+                      (do (system-msg state side (str "accesses " (:title (first unrezzed))))
+                          (handle-access state side unrezzed)
+                          (when (< 1 (count cards))
+                            (resolve-ability
+                              state side (access-helper-archives (filter #(not= (:cid %) (:cid (first unrezzed))) cards))
+                              card nil)))
+                    ; more than one unrezzed upgrade. allow user to select with mouse.
+                      (resolve-ability state side
+                                       {:prompt "Choose an upgrade in Archives to access."
+                                        :choices {:req #(= (second (:zone %)) :archives)}
+                                        :effect (effect (system-msg (str "accesses " (:title target)))
+                                                        (handle-access [target])
+                                                        (resolve-ability (access-helper-archives
+                                                                           (remove-once #(not= (:cid %) (:cid target))
+                                                                                        cards)) card nil))} card nil)))
+                  ; accessing a rezzed upgrade, or a card in archives
+                  (do (system-msg state side (str "accesses " target))
+                      (handle-access state side [(some #(when (= (:title %) target) %) cards)])
+                      (when (< 1 (count cards))
+                        (resolve-ability state side (access-helper-archives
+                                                      (remove-once #(not= (:title %) target) cards)) card nil)))))})
+
+(defmethod choose-access :archives [cards server]
+  {:effect (req (let [; only include agendas and cards with an :access ability whose :req is true
+                      ; (or don't have a :req, or have an :optional with no :req, or :optional with a true :req.)
+                      cards (filter #(let [cdef (card-def %)]
+                                      (or (= (:type %) "Agenda") (= (last (:zone %)) :content)
+                                          (and (:access cdef) (not (get-in cdef [:access :optional]))
+                                               (or (not (get-in cdef [:access :req]))
+                                                   ((get-in cdef [:access :req]) state side % nil)))
+                                          (and (get-in cdef [:access :optional])
+                                               (or (not (get-in cdef [:access :optional :req]))
+                                                   ((get-in cdef [:access :optional :req]) state side % nil)))))
+                                    cards)]
+                  (if (pos? (count cards))
+                    (if (= 1 (count cards))
+                      (do (when (pos? (count cards)) (system-msg state side (str "accesses " (:title (first cards)))))
+                          (handle-access state side cards))
+                      (resolve-ability state side (access-helper-archives cards) card nil)))))})
 
 (defmethod access :hq [state side server]
   (concat (take (access-count state side :hq-access) (shuffle (get-in @state [:corp :hand])))
@@ -835,13 +1016,13 @@
   (swap! state update-in [:run :access-bonus] #(+ % n)))
 
 (defn do-access [state side server]
+  (trigger-event state side :pre-access (first server))
   (let [cards (access state side server)]
     (when-not (or (= (get-in @state [:run :max-access]) 0) (empty? cards))
       (if (= (first server) :rd)
         (let [n (count cards)]
-          (system-msg state side (str "accesses " n " card" (when (> n 1) "s"))))
-        (system-msg state side (str "accesses " (join ", "(map :title cards)))))
-      (handle-access state side cards)))
+          (system-msg state side (str "accesses " n " card" (when (> n 1) "s")))))
+      (resolve-ability state side (choose-access cards server) nil nil)))
   (handle-end-run state side))
 
 (defn replace-access [state side ability card]
@@ -900,8 +1081,6 @@
       (when (> pos 0)
         (let [ice (get-card state (nth (get-in @state [:run :ices]) (dec pos)))]
           (trigger-event state side :approach-ice ice))))
-          ; update icebreaker with abilities
-
     (doseq [p (filter #(has? % :subtype "Icebreaker") (all-installed state :runner))]
       (update! state side (update-in (get-card state p) [:pump] dissoc :encounter))
       (update-breaker-strength state side p))))
@@ -920,7 +1099,7 @@
         (resolve-ability state side ab card targets))))
 
 (defn start-turn [state side args]
-  (system-msg state side (str "started his or her turn"))
+  (system-msg state side (str "started their turn"))
   (swap! state assoc :active-player side :per-turn nil :end-turn false)
   (swap! state assoc-in [side :register] nil)
   (swap! state assoc-in [side :click] (get-in @state [side :click-per-turn]))
@@ -930,7 +1109,7 @@
 (defn end-turn [state side args]
   (let [max-hand-size (get-in @state [side :max-hand-size])]
     (when (<= (count (get-in @state [side :hand])) max-hand-size)
-      (system-msg state side (str "is ending his or her turn"))
+      (system-msg state side (str "is ending their turn"))
       (if (= side :runner)
         (do (when (< (get-in @state [:runner :max-hand-size]) 0)
               (flatline state))
@@ -971,7 +1150,6 @@
          (let [c (move state side (assoc card :seen true) :play-area)]
            (system-msg state side (str "plays " title))
            (trigger-event state side (if (= side :corp) :play-operation :play-event) c)
-           (resolve-ability state side cdef card nil)
            (if (has? c :subtype "Current")
              (do (doseq [s [:corp :runner]]
                    (when-let [current (first (get-in @state [s :current]))]
@@ -979,7 +1157,9 @@
                      (trash state side current)))
                  (let [moved-card (move state side (first (get-in @state [side :play-area])) :current)]
                    (card-init state side moved-card)))
-             (move state side (first (get-in @state [side :play-area])) :discard)))))))
+             (do
+               (resolve-ability state side cdef card nil)
+               (move state side (first (get-in @state [side :play-area])) :discard))))))))
 
 (defn in-play? [state card]
   (let [dest (when (= (:side card) "Runner")
@@ -1002,10 +1182,12 @@
    (swap! state update-in (cons side (vec zone)) (fn [coll] (remove-once #(not= (:cid %) cid) coll)))
    (let [c (assoc target :host (update-in card [:zone] #(map to-keyword %))
                          :facedown facedown
-                         :zone '(:onhost))] ;; hosted cards should not be in :discard or :hand etc
+                         :zone '(:onhost) ;; hosted cards should not be in :discard or :hand etc
+                         :previous-zone (:zone target))]
      (update! state side (update-in card [:hosted] #(conj % c)))
      (when-let [events (:events (card-def target))]
-       (register-events state side events c))
+       (when installed
+         (register-events state side events c)))
      c)))
 
 (defn runner-install
@@ -1048,6 +1230,7 @@
   ([state side card {:keys [no-cost] :as args}]
      (trigger-event state side :pre-rez card)
      (when (or (#{"Asset" "ICE" "Upgrade"} (:type card)) (:install-rezzed (card-def card)))
+       (trigger-event state side :pre-rez-cost card)
        (let [cdef (card-def card) cost (rez-cost state side card)]
          (when (or no-cost (pay state side card :credit cost (:additional-cost cdef)))
            (card-init state side (assoc card :rezzed true))
@@ -1058,7 +1241,7 @@
 
 (defn corp-install
   ([state side card server] (corp-install state side card server nil))
-  ([state side card server {:keys [extra-cost no-install-cost rezzed] :as args}]
+  ([state side card server {:keys [extra-cost no-install-cost install-state] :as args}]
      (if-not server
        (prompt! state side card (str "Choose a server to install " (:title card))
                 (server-list state card) {:effect (effect (corp-install card target args))})
@@ -1069,7 +1252,8 @@
                  slot (conj (server->zone state server) (if (= (:type c) "ICE") :ices :content))
                  dest-zone (get-in @state (cons :corp slot))
                  install-cost (if (and (= (:type c) "ICE") (not no-install-cost))
-                                (count dest-zone) 0)]
+                                (count dest-zone) 0)
+                 install-state (or install-state (:install-state cdef))]
              (when (and (not (and (has? c :subtype "Region")
                                   (some #(has? % :subtype "Region") dest-zone)))
                         (pay state side card extra-cost :credit install-cost))
@@ -1078,7 +1262,8 @@
                    (system-msg state side (str "trashes " (if (:rezzed prev-card)
                                                             (:title prev-card) "a card") " in " server))
                    (trash state side prev-card {:keep-server-alive true})))
-               (let [card-name (if (or rezzed (:rezzed c) (= (:install-state cdef) :face-up)) (:title card) "a card")]
+               (let [card-name (if (or (= :rezzed install-state) (= :face-up install-state) (:rezzed c))
+                                 (:title card) "a card")]
                  (if (> install-cost 0)
                    (system-msg state side (str "pays " install-cost " [Credits] to install "
                                                card-name " in " server))
@@ -1087,11 +1272,10 @@
                  (trigger-event state side :corp-install moved-card)
                  (when (= (:type c) "Agenda")
                    (update-advancement-cost state side moved-card))
-                 (when (or rezzed (= (:install-state cdef) :rezzed))
+                 (when (= install-state :rezzed)
                    (rez state side moved-card {:no-cost true}))
-                 (when (= (:install-state cdef) :face-up)
-                   (do (card-init state side (assoc (get-card state moved-card) :rezzed true))
-                       (resolve-ability state side cdef (get-card state moved-card) nil))))))))))
+                 (when (= install-state :face-up)
+                   (card-init state side (assoc (get-card state moved-card) :rezzed true) false)))))))))
 
 (defn play [state side {:keys [card server]}]
   (case (:type card)
@@ -1155,6 +1339,9 @@
 (defn prevent-jack-out [state side]
   (swap! state assoc-in [:run :cannot-jack-out] true))
 
+(defn prevent-steal [state side]
+  (swap! state assoc-in [:runner :register :cannot-steal] true))
+
 (defn move-card [state side {:keys [card server]}]
   (let [c (update-in card [:zone] #(map to-keyword %))
         label (if (or (= (:side c) "Runner") (:rezzed c) (:seen c)
@@ -1207,8 +1394,8 @@
 (defn shuffle-deck [state side {:keys [close] :as args}]
   (swap! state update-in [side :deck] shuffle)
   (if close
-    (system-msg state side "stops looking at his deck and shuffles it")
-    (system-msg state side "shuffles his deck")))
+    (system-msg state side "stops looking at their deck and shuffles it")
+    (system-msg state side "shuffles their deck")))
 
 (defn auto-pump [state side args]
   (let [run (:run @state) card (get-card state (:card args))

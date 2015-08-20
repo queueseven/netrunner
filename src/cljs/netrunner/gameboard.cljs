@@ -70,9 +70,11 @@
 (defn send-msg [event owner]
   (.preventDefault event)
   (let [input (om/get-node owner "msg-input")
-        text (.-value input)]
+        text (.-value input)
+        $div (js/$ ".gameboard .messages")]
     (when-not (empty? text)
       (send-command "say" {:text text})
+      (.scrollTop $div (+ (.prop $div "scrollHeight") 500))
       (aset input "value" "")
       (.focus input))))
 
@@ -100,7 +102,7 @@
 (defn handle-card-click [{:keys [type zone counter advance-counter advancementcost advanceable
                                  root] :as card} owner]
   (let [side (:side @game-state)]
-    (if-not (empty? (get-in @game-state [side :selected]))
+    (if (= (get-in @game-state [side :prompt 0 :prompt-type]) "select")
       (send-command "select" {:card card})
       (if (and (= (:type card) "Identity") (= side (keyword (.toLowerCase (:side card)))))
         (handle-abilities card owner)
@@ -154,7 +156,7 @@
   (if-let [[title code] (extract-card-info item)]
     [:span {:class "fake-link" :id code} title]
     [:span item])))
-   
+
 (defn get-alt-art [[title cards]]
   (let [s (sort-by #(not= (:setname %) "Alternates") cards)]
     {:title title :code (:code (first s))}))
@@ -162,40 +164,46 @@
 (defn prepare-cards []
  (->> (:cards @app-state)
       (group-by :title)
-      (map get-alt-art)))
+      (map get-alt-art)
+      (sort-by #(count (:title %1)))
+      (reverse)))
 
 (def prepared-cards (memoize prepare-cards))
 
 (def create-span (memoize create-span-impl))
 
 (defn add-image-codes-impl [text]
-  (reduce #(.replace %1 (js/RegExp. (str "\\b" (:title %2) "\\b") "g") (str "[" (:title %2) "~"(:code %2) "]")) text (prepared-cards)))
+  (reduce #(.replace %1 (js/RegExp. (str "(^|[^\\[\\S])" (:title %2) "(?![~\\w])") "g") (str "$1" "[" (:title %2) "~" (:code %2) "]")) text (prepared-cards)))
 
-(def add-image-codes (memoize add-image-codes-impl))  
-  
+(def add-image-codes (memoize add-image-codes-impl))
+
 (defn get-message-parts-impl [text]
   (let [with-image-codes (add-image-codes (if (nil? text) "" text))]
       (.split with-image-codes (js/RegExp. "(\\[[^\\]]*])" "g"))))
 
 (def get-message-parts (memoize get-message-parts-impl))
-      
+
 (defn get-card-code [e]
   (let [code (str (.. e -target -id))]
     (if (> (count code) 0)
       code)))
 
 (defn card-preview-mouse-over [e]
-    (if-let [code (get-card-code e)] (put! zoom-channel {:code code})))
+  (if-let [code (get-card-code e)] (put! zoom-channel {:code code})))
 
 (defn card-preview-mouse-out [e]
-    (if-let [code (get-card-code e)] (put! zoom-channel false)))
-    
+  (if-let [code (get-card-code e)] (put! zoom-channel false)))
+
 (defn log-pane [messages owner]
   (reify
     om/IDidUpdate
     (did-update [this prev-props prev-state]
-      (let [div (om/get-node owner "msg-list")]
-        (aset div "scrollTop" (.-scrollHeight div))))
+      (let [div (om/get-node owner "msg-list")
+            scrolltop (.-scrollTop div)
+            height (.-scrollHeight div)]
+        (when (or (zero? scrolltop)
+                  (< (- height scrolltop (.height (js/$ ".gameboard .log"))) 500))
+          (aset div "scrollTop" height))))
 
     om/IRenderState
     (render-state [this state]
@@ -342,13 +350,14 @@
 (defn show-deck [event owner ref]
   (-> (om/get-node owner (str ref "-content")) js/$ .fadeIn)
   (-> (om/get-node owner (str ref "-menu")) js/$ .fadeOut)
-  (send-command "system-msg" {:msg "looks at his deck"}))
+  (send-command "system-msg" {:msg "looks at their deck"}))
 
-(defn close-popup [event owner ref shuffle?]
+(defn close-popup [event owner ref msg shuffle?]
   (-> (om/get-node owner ref) js/$ .fadeOut)
-  (if shuffle?
-    (send-command "shuffle" {:close "true"})
-    (send-command "system-msg" {:msg "stops looking at his deck"}))
+  (when shuffle?
+    (send-command "shuffle" {:close "true"}))
+  (when msg
+    (send-command "system-msg" {:msg msg}))
   (.stopPropagation event))
 
 (defmulti deck-view #(get-in % [:identity :side]))
@@ -368,8 +377,10 @@
      (when (= (:side @game-state) :runner)
        [:div.panel.blue-shade.popup {:ref "stack-content"}
         [:div
-         [:a {:on-click #(close-popup % owner "stack-content" false)} "Close"]
-         [:a {:on-click #(close-popup % owner "stack-content" true)} "Close & Shuffle"]]
+         [:a {:on-click #(close-popup % owner "stack-content" "stops looking at their deck" false)}
+          "Close"]
+         [:a {:on-click #(close-popup % owner "stack-content" "stops looking at their deck" true)}
+          "Close & Shuffle"]]
         (om/build-all card-view deck {:key :cid})])
      (when (> (count deck) 0)
        [:img.card.bg {:src "/img/runner.png"}])])))
@@ -390,8 +401,8 @@
      (when (= (:side @game-state) :corp)
        [:div.panel.blue-shade.popup {:ref "rd-content"}
         [:div
-         [:a {:on-click #(close-popup % owner "rd-content" false)} "Close"]
-         [:a {:on-click #(close-popup % owner "rd-content" true)} "Close & Shuffle"]]
+         [:a {:on-click #(close-popup % owner "rd-content" "stops looking at their deck" false)} "Close"]
+         [:a {:on-click #(close-popup % owner "rd-content" "stops looking at their deck" true)} "Close & Shuffle"]]
         (om/build-all card-view deck {:key :cid})])
      (when (> (count deck) 0)
        [:img.card.bg {:src "/img/corp.png"}])])))
@@ -402,9 +413,11 @@
   (om/component
    (sab/html
     [:div.panel.blue-shade.discard
-     (drop-area :runner "Heap" {:on-click #(-> (om/get-node owner "popup") js/$ .toggle)})
+     (drop-area :runner "Heap" {:on-click #(-> (om/get-node owner "popup") js/$ .fadeIn)})
      (om/build label discard {:opts {:name "Heap"}})
      [:div.panel.blue-shade.popup {:ref "popup" :class (when (= (:side @game-state) :corp) "opponent")}
+      [:div
+       [:a {:on-click #(close-popup % owner "popup" nil false)} "Close"]]
       (om/build-all card-view discard {:key :cid})]
      (when-not (empty? discard)
        (om/build card-view (last discard)))])))
@@ -414,10 +427,12 @@
    (sab/html
     [:div.panel.blue-shade.discard
      (drop-area :corp "Archives" {:class (when (> (count (get-in servers [:discard :content])) 0) "shift")
-                                  :on-click #(-> (om/get-node owner "popup") js/$ .toggle)})
+                                  :on-click #(-> (om/get-node owner "popup") js/$ .fadeIn)})
      (om/build label discard {:opts {:name "Archives"}})
 
      [:div.panel.blue-shade.popup {:ref "popup" :class (when (= (:side @game-state) :runner) "opponent")}
+      [:div
+       [:a {:on-click #(close-popup % owner "popup" nil false)} "Close"]]
       (for [c discard]
         (if (or (:seen c) (:rezzed c))
           (om/build card-view c)
@@ -472,9 +487,10 @@
       [:div.stats.panel.blue-shade {}
        [:h4.ellipsis (om/build avatar user {:opts {:size 22}}) (:username user)]
        [:div (str click " Click" (if (> click 1) "s" "")) (when me? (controls :click))]
-       [:div (str credit " Credit" (if (> credit 1) "s" "")) (when me? (controls :credit))]
-       (when (:run @game-state)
-        [:div.fake-link (str run-credit " Run Credit" (if (> credit 1) "s" "")) (when me? (controls :run-credit))])
+       [:div (str credit " Credit" (if (> credit 1) "s" "")
+                  (when (> run-credit 0)
+                    (str " (" run-credit " for run)")))
+        (when me? (controls :credit))]
        [:div (str memory " Memory Unit" (if (> memory 1) "s" "")) (when me? (controls :memory))]
        [:div (str link " Link" (if (> link 1) "s" "")) (when me? (controls :link))]
        [:div (str agenda-point " Agenda Point" (when (> agenda-point 1) "s"))
@@ -580,6 +596,11 @@
             (let [card (<! zoom-channel)]
               (om/set-state! owner :zoom card)))))
 
+    om/IDidUpdate
+    (did-update [this prev-props prev-state]
+      (when (get-in cursor [side :prompt 0 :show-discard])
+        (-> ".me .discard .popup" js/$ .fadeIn)))
+
     om/IRenderState
     (render-state [this state]
       (sab/html
@@ -616,7 +637,7 @@
 
                 (when (:keep me)
                   (if-let [prompt (first (:prompt me))]
-                    [:div.panel.blue-shade 
+                    [:div.panel.blue-shade
                      [:h4 (for [item (get-message-parts (:msg prompt))] (create-span item))]
                      (if-let [n (get-in prompt [:choices :number])]
                        [:div
@@ -691,15 +712,18 @@
                        (when (= side :corp)
                          (cond-button "Purge" (>= (:click me) 3) #(send-command "purge")))
                        (when (= side :corp)
-                         (cond-button "Trash Resource" (and (>= (:click me) 1) (>= (:credit me) 2)
-                                                            (>= (:tag opponent) 1)) #(send-command "trash-resource")))
+                         (cond-button "Trash Resource" (and (> (:click me) 0) (> (:credit me) 1)
+                                                            (or (> (:tagged opponent) 0)
+                                                                (> (:tag opponent) 0)))
+                                      #(send-command "trash-resource")))
                        (cond-button "Draw" (>= (:click me) 1) #(send-command "draw"))
                        (cond-button "Gain Credit" (>= (:click me) 1) #(send-command "credit"))])))]]
 
               [:div.board
                (om/build board-view {:player opponent :run run})
                (om/build board-view {:player me :run run})]]
-             (om/build zones {:player me :remotes (get-in cursor [:corp :servers :remote])})]
+             [:div.me
+              (om/build zones {:player me :remotes (get-in cursor [:corp :servers :remote])})]]
             [:div.rightpane {}
              [:div.card-zoom
               (when-let [card (om/get-state owner :zoom)]

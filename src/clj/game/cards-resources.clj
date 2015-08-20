@@ -94,6 +94,10 @@
    "Decoy"
    {:abilities [{:msg "avoid 1 tag" :effect (effect (trash card {:cause :ability-cost}))}]}
 
+   "Drug Dealer"
+   {:events {:corp-turn-begins {:msg "draw 1 card" :effect (effect (draw :runner 1))}
+             :runner-turn-begins {:msg "lose 1 credit" :effect (effect (lose :credit 1))}}}
+
    "Duggars"
    {:abilities [{:cost [:click 4] :effect (effect (draw 10)) :msg "draw 10 cards"}]}
 
@@ -118,15 +122,18 @@
                  :effect (effect (trash-prevent :resource 1) (trash card {:unpreventable true :cause :ability-cost}))}
                 {:effect (effect (trash card {:cause :ability-cost}) (gain :credit 2)) :msg "gain 2 [Credits]"}]}
 
+   "Fan Site"
+   {:events {:agenda-scored {:msg "add it to the Runner's score area"
+                             :effect (effect (move :runner card :scored))}}}
+
    "Fester"
    {:events {:purge {:msg "force the Corp to lose 2 [Credits] if able"
                      :effect (effect (pay :corp card :credit 2))}}}
 
    "Gang Sign"
-   {:events {:agenda-scored {:msg "access 1 card from HQ"
-                             :effect (req (doseq [c (take (get-in @state [:runner :hq-access]) (shuffle (:hand corp)))]
-                                            (system-msg state :runner (str "accesses " (:title c)))
-                                            (handle-access state :runner [c])))}}}
+   {:events {:agenda-scored {:msg (msg "access " (get-in @state [:runner :hq-access]) " card from HQ")
+                             :effect (req (let [c (take (get-in @state [:runner :hq-access]) (shuffle (:hand corp)))]
+                                            (resolve-ability state :runner (choose-access c '(:hq)) card nil)))}}}
 
    "Ghost Runner"
    {:data {:counter 3}
@@ -212,7 +219,7 @@
                  :msg (msg "host " (:title target))
                  :effect (effect (runner-install target {:host-card card :no-cost true}))}
                 {:label "Add a program hosted on London Library to your Grip" :cost [:click 1]
-                 :choices {:req #(:host %)} :msg (msg "add " (:title target) "to his or her Grip")
+                 :choices {:req #(:host %)} :msg (msg "add " (:title target) "to their Grip")
                  :effect (effect (move target :hand))}]
     :events {:runner-turn-ends {:effect (req (doseq [c (:hosted card)]
                                                (trash state side c)))}}}
@@ -220,7 +227,7 @@
    "Motivation"
    {:events
     {:runner-turn-begins
-     {:msg "look at the top card of his Stack"
+     {:msg "look at the top card of their Stack"
       :effect (effect (prompt! card (str "The top card of your Stack is "
                                          (:title (first (:deck runner)))) ["OK"] {}))}}}
    "Mr. Li"
@@ -232,8 +239,22 @@
                                 (move state side (first (:deck runner)) :deck)))}]}
 
    "Muertos Gang Member"
-   {:abilities [{:msg "draw 1 card"
-                 :effect (effect (trash card {:cause :ability-cost}) (draw))}] }
+   {:effect (req (resolve-ability
+                   state :corp
+                   {:prompt "Choose a card to derez"
+                    :choices {:req #(and (= (:side %) "Corp") (:rezzed %))}
+                    :effect (req (derez state side target))}
+                  card nil))
+    :leave-play (req (resolve-ability
+                       state :corp
+                       {:prompt "Choose a card to rez, ignoring the rez cost"
+                        :choices {:req #(not (:rezzed %))}
+                        :effect (req (gain state :corp :credit (rez-cost state side target))
+                                     (rez state side target) 
+                                     (system-msg state side (str "rezzes " (:title target) " at no cost")))}
+                      card nil))
+    :abilities [{:msg "draw 1 card"
+                 :effect (effect (trash card {:cause :ability-cost}) (draw))}]}
 
    "New Angeles City Hall"
    {:events {:agenda-stolen {:msg "trash itself" :effect (effect (trash card))}}
@@ -273,6 +294,33 @@
                                                            :effect (effect (gain :credit 1))} card nil)))))
     :leave-play (req (remove-watch state :order-of-sol))}
 
+   "Paige Piper"
+   (let [pphelper (fn [card cards] 
+                    (let [num (count cards)] 
+                      {:optional {:req (req (> num 0))
+                       :prompt (str "Use Paige Piper to trash copies of " (:title card) "?")
+                       :choices {:number (req num)}
+                       :msg "to shuffle their Stack"
+                       :effect (req (doseq [c (take (int target) cards)]
+                                      (trash state side c))
+                                    (shuffle! state :runner :deck)
+                                    (when (> (int target) 0)
+                                      (system-msg state side (str "trashes " (int target) 
+                                                                  " cop" (if (> (int target) 1) "ies" "y") 
+                                                                  " of " (:title card)))))}}))]
+    {:events {:runner-install {:req (req (first-event state side :runner-install))
+                               :effect (effect (resolve-ability 
+                                                (pphelper target (->> (:deck runner) 
+                                                                      (filter #(has? % :title (:title target)))
+                                                                      (vec))) 
+                                                card nil))}}})
+    
+   "Paparazzi"
+   {:effect (req (swap! state update-in [:runner :tagged] inc))
+    :events {:pre-damage {:req (req (= target :meat)) :msg "prevent all meat damage"
+                          :effect (effect (damage-prevent :meat Integer/MAX_VALUE))}}
+    :leave-play (req (swap! state update-in [:runner :tagged] dec))}
+
    "Personal Workshop"
    (let [remove-counter
          {:req (req (not (empty? (:hosted card))))
@@ -282,7 +330,9 @@
                          (add-prop state side target :counter -1)))}]
      {:abilities [{:label "Host a program or piece of hardware" :cost [:click 1]
                    :prompt "Choose a card to host on Personal Workshop"
-                   :choices (req (filter #(#{"Program" "Hardware"} (:type %)) (:hand runner)))
+                   :choices {:req #(and (#{"Program" "Hardware"} (:type %))
+                                        (= (:zone %) [:hand])
+                                        (= (:side %) "Runner"))}
                    :effect (effect (host card (assoc target :counter (:cost target))))
                    :msg (msg "host " (:title target) "")}
                   (assoc remove-counter
@@ -315,16 +365,20 @@
                               (when (< (get-in old [:corp :bad-publicity]) (get-in new [:corp :bad-publicity]))
                                 (resolve-ability
                                  ref side
-                                 {:msg "access 1 card from HQ"
-                                  :effect (req (doseq [c (take (get-in @state [:runner :hq-access]) (shuffle (:hand corp)))]
-                                                 (system-msg state side (str "accesses " (:title c)))
-                                                 (handle-access state side [c])))} card nil)))))
+                                 {:msg (msg "access " (get-in @state [:runner :hq-access]) " card from HQ")
+                                  :effect (req (let [c (take (get-in @state [:runner :hq-access]) (shuffle (:hand corp)))]
+                                                 (resolve-ability state :runner (choose-access c '(:hq)) card nil)))}
+                                 card nil)))))
     :leave-play (req (remove-watch state :raymond-flint))
     :abilities [{:label "Expose 1 card"
                  :effect (effect (resolve-ability
                                    {:choices {:req #(= (first (:zone %)) :servers)}
                                     :effect (effect (expose target) (trash card {:cause :ability-cost}))
                                     :msg (msg "expose " (:title target))} card nil))}]}
+
+   "Rolodex"
+   {:effect (req (doseq [c (take 5 (:deck runner))] (move state side c :play-area)))
+    :leave-play (effect (mill :runner 3))}
 
    "Sacrificial Clone"
    {:prevent {:damage [:meat :net :brain]}
@@ -367,6 +421,9 @@
                                      :effect (effect (resolve-ability
                                                       {:msg "gain 2 [Credits] instead of accessing"
                                                        :effect (effect (gain :credit 2))} st nil))})))}}}
+
+   "Spoilers"
+   {:events {:agenda-scored {:msg "trash the top card of R&D" :effect (effect (mill :corp))}}}
 
    "Starlight Crusade Funding"
    {:events {:runner-turn-begins {:msg "lose [Click]" :effect (effect (lose :click 1))}}}
@@ -467,7 +524,7 @@
     :leave-play (effect (damage :meat 3 {:unboostable true :card card}))}
 
    "Tyson Observatory"
-   {:abilities [{:prompt "Choose a piece of Hardware" :msg (msg "adds " (:title target) " to his Grip")
+   {:abilities [{:prompt "Choose a piece of Hardware" :msg (msg "adds " (:title target) " to their Grip")
                  :choices (req (filter #(has? % :type "Hardware") (:deck runner)))
                  :cost [:click 2] :effect (effect (move target :hand) (shuffle! :deck))}]}
 
@@ -500,8 +557,8 @@
                                   :effect (effect (lose :click 1) (draw 2))}}}
 
    "Xanadu"
-   {:events {:pre-rez {:req (req (= (:type target) "ICE"))
-                       :effect (effect (rez-cost-bonus 1))}}}
+   {:events {:pre-rez-cost {:req (req (= (:type target) "ICE"))
+                            :effect (effect (rez-cost-bonus 1))}}}
 
    "Zona Sul Shipping"
    {:events {:runner-turn-begins {:effect (effect (add-prop card :counter 1))}}
@@ -514,3 +571,4 @@
                                 (remove-watch state (keyword (str "zona-sul-shipping" (:cid card))))
                                 (trash ref :runner card)
                                 (system-msg ref side "trash Zona Sul Shipping for being tagged")))))}})
+

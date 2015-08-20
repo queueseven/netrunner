@@ -3,10 +3,19 @@
 (def cards-upgrades
   {
    "Akitaro Watanabe"
-   {:events {:pre-rez {:req (req (and (= (:type target) "ICE")
-                                      (= (card->server state card) (card->server state target))))
-                       :effect (effect (rez-cost-bonus -2))}}}
+   {:events {:pre-rez-cost {:req (req (and (= (:type target) "ICE")
+                                           (= (card->server state card) (card->server state target))))
+                            :effect (effect (rez-cost-bonus -2))}}}
 
+   "Amazon Industrial Zone"
+   {:events 
+     {:corp-install  {:optional {:req (req (and (= (:type target) "ICE")
+                                                (= (card->server state card) (card->server state target))))
+                                 :prompt "Rez ICE with rez cost lowered by 3?" 
+                                 :effect (effect
+                                           (rez-cost-bonus -3) 
+                                           (rez target))}}}}
+                                                          
    "Ash 2X3ZB9CY"
    {:abilities [{:label "Trace 4 - Prevent the Runner from accessing cards other than Ash 2X3ZB9CY"
                  :trace {:base 4
@@ -23,12 +32,17 @@
                                       :effect (effect (gain :runner :tag 1))}}}}
 
    "Breaker Bay Grid"
-   {:events {:pre-rez {:req (req (= (:zone card) (:zone target)))
-                       :effect (effect (rez-cost-bonus -5))}}}
+   {:events {:pre-rez-cost {:req (req (= (:zone card) (:zone target)))
+                            :effect (effect (rez-cost-bonus -5))}}}
 
    "Caprice Nisei"
    {:abilities [{:msg "start a Psi game"
                  :psi {:not-equal {:msg "end the run" :effect (effect (end-run))}}}]}
+
+   "ChiLo City Grid"
+   {:events {:successful-trace {:req (req this-server)
+                                :effect (effect (gain :runner :tag 1))
+                                :msg "give the Runner 1 tag"}}}
 
    "Corporate Troubleshooter"
    {:abilities [{:label "Add strength to a rezzed ICE protecting this server" :choices :credit
@@ -54,6 +68,13 @@
                                                      :effect (effect (ice-strength-bonus (:troubleshooter-amount card)))}
                                   :runner-turn-ends ct :corp-turn-ends ct}) card))}}
 
+   "Crisium Grid"
+   {:suppress {:successful-run {:req (req (and this-server (not= (:cid target) (:cid card))))}}
+    :events {:successful-run {:req (req this-server)
+                              :effect (req (swap! state update-in [:run :run-effect] dissoc :replace-access)
+                                           (swap! state update-in [:run] dissoc :successful)
+                                           (swap! state update-in [:runner :register :successful-run] #(butlast %)))}}}
+
    "Cyberdex Virus Suite"
    {:access {:optional {:prompt "Purge viruses with Cyberdex Virus Suite?"
                         :msg (msg "purge viruses") :effect (effect (purge))}}
@@ -68,6 +89,11 @@
                                 :effect (effect (ice-strength-bonus 1))}}
     :derez-effect {:effect (req (update-ice-in-server state side (card->server state card)))}
     :trash-effect {:effect (req (update-all-ice state side))}}
+
+   "Expo Grid"
+   {:events {:corp-turn-begins {:req (req (not (empty? (filter #(and (= (:type %) "Asset") (:rezzed %))
+                                                               (get-in corp (:zone card))))))
+                                :msg "gain 1 [Credits]" :effect (effect (gain :credit 1))}}}
 
    "Hokusai Grid"
    {:events {:successful-run {:req (req this-server) :msg "do 1 net damage"
@@ -88,9 +114,18 @@
    {:events {:pre-trash {:req (req (= (:zone card) (:zone target)))
                          :effect (effect (trash-cost-bonus 3))}}}
 
+   "Off the Grid"
+   {:events {:successful-run {:req (req (= target :hq))
+                              :effect (req (trash state :corp card)
+                                           (system-msg state :corp (str "trashes Off the Grid")))}}}
+
    "Panic Button"
    {:init {:root "HQ"} :abilities [{:cost [:credit 1] :effect (effect (draw))
                                     :req (req (and run (= (first (:server run)) :hq)))}]}
+
+   "Product Placement"
+   {:access {:req (req (not= (first (:zone card)) :discard))
+             :msg "gain 2 [Credits]" :effect (effect (gain :corp :credit 2))}}
 
    "Red Herrings"
    {:events {:pre-steal-cost {:req (req (= (:zone card) (:zone target)))

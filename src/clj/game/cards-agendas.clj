@@ -7,8 +7,11 @@
                            (str "install " c " ICE and trash " (- 3 c) " cards")))
                :effect (req (doseq [c (take 3 (:deck corp))]
                               (if (= (:type c) "ICE")
-                                (corp-install state side c nil {:no-install-cost true :rezzed true})
+                                (corp-install state side c nil {:no-install-cost true :install-state :rezzed})
                                 (trash state side c))))}}
+
+   "Ancestral Imager"
+   {:events {:jack-out {:msg "do 1 net damage" :effect (effect (damage :net 1))}}}
 
    "AstroScript Pilot Program"
    {:data {:counter 1}
@@ -19,6 +22,17 @@
                                      (= (:type %) "Agenda"))}
                  :effect (effect (add-prop target :advance-counter 1))}]}
 
+   "Award Bait"
+   {:access {:choices ["0", "1", "2"] :prompt "How many advancement tokens?"
+             :effect (req (let [c (Integer/parseInt target)]
+                            (resolve-ability
+                             state side
+                             {:choices {:req #(or (= (:advanceable %) "always")
+                                                  (and (= (:advanceable %) "while-rezzed") (:rezzed %))
+                                                  (= (:type %) "Agenda"))}
+                              :msg (msg "add " c " advancement tokens on a card")
+                              :effect (effect (add-prop :corp target :advance-counter c))} card nil)))}}
+
    "Bifrost Array"
    {:req (req (not (empty? (filter #(not= (:title %) "Bifrost Array") (:scored corp)))))
     :msg (msg "trigger the score ability on " (:title target))
@@ -28,9 +42,8 @@
 
    "Braintrust"
    {:effect (effect (set-prop card :counter (quot (- (:advance-counter card) 3) 2)))
-    :events {:pre-rez
-             {:req (req (= (:type target) "ICE"))
-              :effect (effect (rez-cost-bonus (- (:counter (get-card state card)))))}}}
+    :events {:pre-rez-cost {:req (req (= (:type target) "ICE"))
+                            :effect (effect (rez-cost-bonus (- (:counter (get-card state card)))))}}}
 
    "Breaking News"
    {:effect (effect (gain :runner :tag 2)) :msg "give the Runner 2 tags"
@@ -82,6 +95,10 @@
    "Executive Retreat"
    {:data {:counter 1} :effect (effect (shuffle-into-deck :hand))
     :abilities [{:cost [:click 1] :counter-cost 1 :msg "draw 5 cards" :effect (effect (draw 5))}]}
+
+   "Explode-a-palooza"
+   {:access {:optional {:prompt "Gain 5 [Credits] with Explode-a-Palooza ability?"
+                        :msg "gain 5 [Credits]" :effect (effect (gain :corp :credit 5))}}}
 
    "False Lead"
    {:abilities [{:req (req (>= (:click runner) 2)) :msg "force the Runner to lose [Click][Click]"
@@ -145,11 +162,26 @@
 
    "High-Risk Investment"
    {:data {:counter 1}
-    :abilities [{:cost [:click 1] :counter-cost 1 :msg (msg "gain" (:credit runner) " [Credits]")
+    :abilities [{:cost [:click 1] :counter-cost 1 :msg (msg "gain " (:credit runner) " [Credits]")
                  :effect (effect (gain :credit (:credit runner)))}]}
 
    "Hostile Takeover"
    {:effect (effect (gain :credit 7 :bad-publicity 1))}
+
+   "Hollywood Renovation"
+   {:install-state :face-up
+    :events {:advance
+             {:req (req (= (:cid card) (:cid target)))
+              :effect (req (let [n (if (>= (:advance-counter (get-card state card)) 6) 2 1)]
+                             (resolve-ability
+                              state side
+                              {:choices {:req #(and (not= (:cid %) (:cid card))
+                                                    (or (= (:advanceable %) "always")
+                                                        (and (= (:advanceable %) "while-rezzed") (:rezzed %))
+                                                        (= (:type %) "Agenda")))}
+                               :msg (msg "add " n " advancement tokens on "
+                                         (if (:rezzed target) (:title target) "a card"))
+                               :effect (effect (add-prop :corp target :advance-counter n))} card nil)))}}}
 
    "House of Knives"
    {:data {:counter 3}
@@ -168,7 +200,7 @@
                       {:prompt "Choose a card to install" :msg (msg "install and rez " (:title target))
                        :choices (req (filter #(#{"Asset" "Upgrade"} (:type %))
                                              ((if (= target "HQ") :hand :discard) corp)))
-                       :effect (effect (corp-install target nil {:rezzed true}))} card targets))}
+                       :effect (effect (corp-install target nil {:install-state :rezzed}))} card targets))}
 
    "Mandatory Upgrades"
    {:effect (effect (gain :click 1 :click-per-turn 1))}
@@ -176,13 +208,11 @@
    "Market Research"
    {:req (req tagged) :effect (effect (set-prop card :counter 1 :agendapoints 3))}
 
-
    "Medical Breakthrough"
    {:effect (effect (update-all-advancement-costs))
     :stolen (effect (update-all-advancement-costs))
     :advancement-cost-bonus (req (- (count (filter #(= (:title %) "Medical Breakthrough")
                                                    (concat (:scored corp) (:scored runner))))))}
-
 
    "NAPD Contract"
    {:steal-cost-bonus (req [:credit 4])
@@ -220,6 +250,19 @@
     :msg (msg "take " target " bad publicity and gain " (* 5 (Integer/parseInt target)) " [Credits]")
     :effect (effect (gain :credit (* 5 (Integer/parseInt target))
                           :bad-publicity (Integer/parseInt target)))}
+
+   "Project Ares"
+   {:req (req #(and (> (:advance-counter card) 4) (> (count (all-installed state :runner)) 0)))
+    :msg (msg "force the Runner to trash " (- (:advance-counter card) 4) " installed cards and take 1 bad publicity")
+	  :effect (req (let [ares card]
+	                 (resolve-ability
+	                   state :runner
+	                   {:prompt (msg "Choose " (- (:advance-counter ares) 4) " installed cards to trash")
+                      :choices {:max (- (:advance-counter ares) 4) :req #(and (:installed %) (= (:side %) "Runner"))}
+                      :effect (effect (trash-cards targets)
+                                      (system-msg (str "trashes " (join ", " (map :title targets)))))}
+                    card nil))
+	               (gain state :corp :bad-publicity 1))}
 
    "Project Atlas"
    {:effect (effect (set-prop card :counter (max 0 (- (:advance-counter card) 3))))
@@ -272,8 +315,13 @@
    {:access {:msg "give the Runner 1 tag" :effect (effect (gain :runner :tag 1))}}
 
    "The Cleaners"
-   {:events {:pre-damage {:req (req (= target :meat)) :msg "to do 1 additional meat damage"
+   {:events {:pre-damage {:req (req (= target :meat)) :msg "do 1 additional meat damage"
                           :effect (effect (damage-bonus :meat 1))}}}
+
+   "The Future is Now"
+   {:prompt "Choose a card to add to HQ" :choices (req (:deck corp))
+    :msg (msg "add a card from R&D to HQ and shuffle R&D")
+    :effect (effect (move target :hand) (shuffle! :deck))}
 
    "The Future Perfect"
    {:steal-req (req installed)

@@ -46,12 +46,12 @@
 
    "Déjà Vu"
    {:prompt "Choose a card to add to Grip" :choices (req (:discard runner))
-    :msg (msg "add " (:title target) " to his Grip")
+    :msg (msg "add " (:title target) " to their Grip")
     :effect (req (move state side target :hand)
                  (when (has? target :subtype "Virus")
                    (resolve-ability state side
                                     {:prompt "Choose a virus to add to Grip"
-                                     :msg (msg "add " (:title target) " to his Grip")
+                                     :msg (msg "add " (:title target) " to their Grip")
                                      :choices (req (filter #(has? % :subtype "Virus") (:discard runner)))
                                      :effect (effect (move target :hand))} card nil)))}
 
@@ -85,6 +85,27 @@
    {:req (req (some #{:hq} (:successful-run runner-reg))) :msg (msg "derez " (:title target))
     :choices {:req #(and (has? % :type "ICE") (:rezzed %))} :effect (effect (derez target))}
 
+   "Escher"
+   (let [ice-index (fn [state i] (first (keep-indexed #(when (= (:cid %2) (:cid i)) %1)
+                                                      (get-in @state (cons :corp (:zone i))))))
+         eshelp (fn es [] {:prompt "Select two pieces of ice to swap positions"
+                           :choices {:req #(and (= (first (:zone %)) :servers) (= (:type %) "ICE")) :max 2}
+                           :effect (req (if (= (count targets) 2)
+                                          (let [fndx (ice-index state (first targets))
+                                                sndx (ice-index state (second targets))
+                                                fnew (assoc (first targets) :zone (:zone (second targets)))
+                                                snew (assoc (second targets) :zone (:zone (first targets)))]
+                                            (swap! state update-in (cons :corp (:zone (first targets)))
+                                                   #(assoc % fndx snew))
+                                            (swap! state update-in (cons :corp (:zone (second targets)))
+                                                   #(assoc % sndx fnew))
+                                            (update-ice-strength state side fnew)
+                                            (update-ice-strength state side snew)
+                                            (resolve-ability state side (es) card nil))
+                                          (system-msg state side "has finished rearranging ice")))})]
+     {:effect (effect (run :hq {:replace-access {:msg "rearrange installed ice"
+                                                 :effect (effect (resolve-ability (eshelp) card nil))}} card))})
+
    "Eureka!"
    {:effect
     (req (let [topcard (first (:deck runner))
@@ -107,6 +128,9 @@
 
    "Feint"
    {:effect (effect (run :hq) (max-access 0))}
+
+   "Fisk Investment Seminar"
+   {:effect (effect (draw 3) (draw :corp 3))}
 
    "Forged Activation Orders"
    {:choices {:req #(and (has? % :type "ICE") (not (:rezzed %)))}
@@ -143,15 +167,29 @@
                    :effect (effect (trash (first (shuffle (:hand corp)))))}}}
 
    "Hostage"
-   {:prompt "Choose a Connection to install"
-    :choices (req (filter #(and (has? % :subtype "Connection")
-                                (<= (:cost %) (:credit runner))) (:deck runner)))
-    :effect (effect (runner-install target) (shuffle! :deck))}
+   {:prompt "Choose a Connection"
+    :choices (req (filter #(has? % :subtype "Connection") (:deck runner)))
+    :msg (msg "adds " (:title target) " to their Grip and shuffles their Stack") 
+    :effect (req (let [connection target]
+                   (resolve-ability 
+                     state side 
+                     {:prompt (str "Install " (:title connection) "?")
+                      :choices ["Yes" "No"]
+                      :effect (req (let [d target] 
+                                     (resolve-ability state side 
+                                       {:effect (req (when (= "Yes" d)
+                                                       (runner-install state side connection)) 
+                                                     (shuffle! state side :deck)
+                                                     (move state side connection :hand))} card nil)))} 
+                     card nil)))}
 
    "Ive Had Worse"
    {:effect (effect (draw 3))
     :trash-effect {:req (req (#{:meat :net} target))
                    :effect (effect (draw :runner 3)) :msg "draw 3 cards"}}
+
+   "Immolation Script"
+   {:effect (effect (run :archives))}
 
    "Indexing"
    {:effect (effect (run :rd {:replace-access
@@ -190,7 +228,10 @@
    {:effect (effect (draw 3) (lose :tag 2))}
 
    "Legwork"
-   {:effect (effect (run :hq) (access-bonus 2))}
+   {:effect (effect (run :hq) (register-events (:events (card-def card))
+                                               (assoc card :zone '(:discard))))
+    :events {:successful-run {:effect (effect (access-bonus 2))}
+             :run-ends {:effect (effect (unregister-events card))}}}
 
    "Leverage"
    {:req (req (some #{:hq} (:successful-run runner-reg)))
@@ -232,7 +273,7 @@
    "Networking"
    {:effect (effect (lose :tag 1))
     :optional {:cost [:credit 1] :prompt "Pay 1 [Credits] to add Networking to Grip?"
-               :msg "add it to his Grip" :effect (effect (move (last (:discard runner)) :hand))}}
+               :msg "add it to their Grip" :effect (effect (move (last (:discard runner)) :hand))}}
 
    "Notoriety"
    {:req (req (and (some #{:hq} (:successful-run runner-reg))
@@ -351,7 +392,7 @@
 
    "Special Order"
    {:prompt "Choose an Icebreaker"
-    :effect (effect (system-msg (str "adds " (:title target) " to his Grip and shuffles his Stack"))
+    :effect (effect (system-msg (str "adds " (:title target) " to their Grip and shuffles their Stack"))
                     (move target :hand) (shuffle! :deck))
     :choices (req (filter #(has? % :subtype "Icebreaker") (:deck runner)))}
 
@@ -360,7 +401,7 @@
 
    "Stimhack"
    {:prompt "Choose a server" :choices (req servers)
-    :effect (effect (gain :run-credit 9)
+    :effect (effect (gain-run-credits 9)
                     (run target {:end-run
                                  {:msg " take 1 brain damage"
                                   :effect (effect (damage :brain 1 {:unpreventable true :card card}))}}
@@ -392,19 +433,32 @@
              card targets))}
 
    "The Makers Eye"
-   {:effect (effect (run :rd) (access-bonus 2))}
+   {:effect (effect (run :rd) (register-events (:events (card-def card))
+                                               (assoc card :zone '(:discard))))
+    :events {:successful-run {:effect (effect (access-bonus 2))}
+             :run-ends {:effect (effect (unregister-events card))}}}
 
    "Three Steps Ahead"
    {:end-turn {:effect (effect (gain :credit (* 2 (count (:successful-run runner-reg)))))
                :msg (msg "gain " (* 2 (count (:successful-run runner-reg))) " [Credits]")}}
 
+   "Tinkering"
+   {:choices {:req #(and (has? % :type "ICE") (= (first (:zone %)) :servers))} 
+    :effect (req (let [ice target]
+                   (resolve-ability
+                     state :runner
+                     {:prompt (msg "Choose a type") 
+                      :choices ["sentry" "code gate" "barrier"]
+                      :msg (msg "give " (:title ice) " " target " until the end of turn")}
+                      card nil)))}
+    
    "Trade-In"
    {:prompt "Choose a hardware to trash" :choices {:req #(and (:installed %) (= (:type %) "Hardware"))}
     :msg (msg "trash " (:title target) " and gain " (quot (:cost target) 2) " [Credits]")
     :effect (effect (trash target) (gain [:credit (quot (:cost target) 2)])
                     (resolve-ability {:prompt "Choose a Hardware to add to Grip from Stack"
                                       :choices (req (filter #(= (:type %) "Hardware") (:deck runner)))
-                                      :msg (msg "adds " (:title target) " to his Grip")
+                                      :msg (msg "adds " (:title target) " to their Grip")
                                       :effect (effect (move target :hand))} card nil))}
 
    "Traffic Jam"
@@ -416,7 +470,7 @@
 
    "Uninstall"
    {:choices {:req #(and (:installed %) (#{"Program" "Hardware"} (:type %)))}
-    :msg (msg "move " (:title target) " to his or her grip")
+    :msg (msg "move " (:title target) " to their Grip")
     :effect (effect (move target :hand))}
 
    "Vamp"

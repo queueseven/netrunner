@@ -53,7 +53,7 @@
    {:effect (effect (lose :runner :max-hand-size 2))
     :leave-play (effect (gain :runner :max-hand-size 2))
     :trash-effect {:req (req (:access @state))
-                   :effect (effect (move :runner card :scored) (gain :runner :agenda-point 2))}}
+                   :effect (effect (move :runner card :scored) (gain-agenda-point :runner :agenda-point 2))}}
 
    "City Surveillance"
    {:events {:runner-turn-begins
@@ -101,6 +101,9 @@
              {:choices {:req #(and (= (:type %) "Resource"))} :msg (msg "trash " (:title target))
               :effect (effect (trash target))}}}
 
+   "Cybernetics Court"
+   {:effect (effect (gain :max-hand-size 4)) :leave-play (effect (lose :max-hand-size 4))}
+
    "Daily Business Show"
    {:events {:corp-draw
              {:msg "draw additional cards" :once :per-turn :once-key :daily-business-show
@@ -129,10 +132,18 @@
    "Director Haas"
    {:effect (effect (gain :click 1 :click-per-turn 1)) :leave-play (effect (lose :click-per-turn 1))
     :trash-effect {:req (req (:access @state))
-                   :effect (effect (move :runner card :scored) (gain :runner :agenda-point 2))}}
+                   :effect (effect (move :runner card :scored) (gain-agenda-point :runner :agenda-point 2))}}
 
    "Docklands Crackdown"
    {:abilities [{:cost [:click 2] :msg "add 1 power counter" :effect (effect (add-prop card :counter 1))}]}
+
+   "Early Premiere"
+   {:abilities [{:cost [:credit 1] :label "Place 1 advancement token on a card that can be advanced"
+                 :choices {:req #(or (= (:advanceable %) "always")
+                                     (and (= (:advanceable %) "while-rezzed") (:rezzed %))
+                                     (= (:type %) "Agenda"))}
+                 :effect (effect (add-prop target :advance-counter 1)) :once :per-turn
+                 :msg (msg "place 1 advancement token on " (if (:rezzed target) (:title target) "a card"))}]}
 
    "Edge of World"
    {:access {:optional
@@ -177,6 +188,11 @@
     :abilities [{:label "Remove 1 bad publicity for each advancement token on Exposé"
                  :msg (msg "remove " (:advance-counter card) " bad publicities")
                  :effect (effect (trash card) (lose :bad-publicity (:advance-counter card)))}]}
+
+   "Franchise City"
+   {:events {:access {:req (req (= (:type target) "Agenda"))
+                      :msg "add it to his score area and gain 1 agenda point"
+                      :effect (effect (move :corp card :scored) (gain :agenda-point 1))}}}
 
    "Ghost Branch"
    {:advanceable :always
@@ -224,8 +240,23 @@
 
    "Jackson Howard"
    {:abilities [{:cost [:click 1] :effect (effect (draw 2)) :msg "draw 2 cards"}
-                {:effect (effect (move card :rfg)) :label "Remove Jackson Howard from the game"
-                 :msg "shuffle up to 3 cards from Archives into R&D"}]}
+                {:label "Shuffle up to 3 cards from Archives into R&D"
+                 :effect (effect
+                          (move card :rfg)
+                          (resolve-ability
+                           {:show-discard true
+                            :choices {:max 3 :req #(and (:side % "Corp") (= (:zone %) [:discard]))}
+                            :msg (msg "shuffle "
+                                      (let [seen (filter :seen targets)]
+                                        (str (join ", " (map :title seen))
+                                             (let [n (count (filter #(not (:seen %)) targets))]
+                                               (when (pos? n)
+                                                 (str (when-not (empty? seen) " and ") n " card"
+                                                      (when (> n 1) "s"))))))
+                                      " into R&D")
+                            :effect (req (doseq [c targets] (move state side c :deck))
+                                         (shuffle! state side :deck))}
+                           card nil))}]}
 
    "Levy University"
    {:abilities [{:prompt "Choose an ICE" :msg (msg "adds " (:title target) " to HQ")
@@ -306,6 +337,15 @@
                                :effect (effect (damage :net (count (:hand runner)) {:card card}))}}}]
      {:expose ab :access ab})
 
+   "Public Support"
+   {:effect (effect (add-prop card :counter 3))
+    :events {:corp-turn-begins
+             {:effect (req (add-prop state side card :counter -1)
+                           (when (= (:counter card) 1)
+                             (system-msg state :corp "adds Public Support to his scored area and gains 1 agenda point")
+                             (move state :corp (dissoc card :counter) :scored)
+                             (gain state :corp :agenda-point 1)))} }}
+
    "Reversed Accounts"
    {:advanceable :always
     :abilities [{:cost [:click 1]
@@ -325,6 +365,9 @@
                                                               (lose state side :bad-publicity 1)
                                                               (gain state side :credit 5)))}
                                               card targets)))}}}
+   "Ronald Five"
+   {:events {:trash {:req (req (and (= (:side target) "Corp") (= side :runner) (> (:click runner) 0)))
+                     :msg "force the runner to lose 1 [Click]" :effect (effect (lose :runner :click 1))}}}
 
    "Ronin"
    {:advanceable :always
@@ -399,6 +442,17 @@
    {:events {:runner-spent-click {:req (req (not (= (:server run) (:zone card)))) :once :per-turn
                                   :msg "gain 2 [Credits]" :effect (effect (gain :corp :credit 2))}}}
 
+   "Team Sponsorship"
+   {:events {:agenda-scored
+             {:prompt "Install a card from Archives or HQ?" :choices ["Archives" "HQ"]
+              :msg (msg "install a card from " target)
+              :effect (effect (resolve-ability
+                               {:prompt "Choose a card to install"
+                                :choices (req (filter #(not= (:type %) "Operation")
+                                                      ((if (= target "HQ") :hand :discard) corp)))
+                                :effect (effect (corp-install target nil {:no-install-cost true}))}
+                               card targets))}}}
+
    "Tech Startup"
    {:abilities [{:label "Install an asset from R&D"
                  :prompt "Choose an asset to install" :msg (msg "install " (:title target))
@@ -416,7 +470,7 @@
     :leave-play (effect (gain :runner :agenda-point
                               (count (filter #(> (:agendapoints %) 0) (:scored runner)))))
     :trash-effect {:req (req (:access @state))
-                   :effect (effect (move :runner card :scored) (gain :runner :agenda-point 2))}
+                   :effect (effect (move :runner card :scored) (gain-agenda-point :runner :agenda-point 2))}
     :events {:agenda-stolen {:req (req (> (:agendapoints target) 0))
                              :effect (effect (lose :runner :agenda-point 1))}}}
 

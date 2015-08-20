@@ -8,7 +8,7 @@
             [netrunner.main :as main]))
 
 (def app-state
-  (atom {:channels {:general [] :america [] :europe [] :asia-pacific [] :francais [] :italia [] :sverige []}}))
+  (atom {:channels {:general [] :america [] :europe [] :asia-pacific [] :francais [] :español [] :italia [] :sverige []}}))
 
 (def chat-channel (chan))
 (def chat-socket (.connect js/io (str js/iourl "/chat")))
@@ -26,12 +26,14 @@
   (authenticated
    (fn [user]
      (let [input (om/get-node owner "msg-input")
-           text (.-value input)]
+           text (.-value input)
+           $div (js/$ ".chat-app .message-list")]
        (when-not (empty? text)
          (.emit chat-socket "netrunner" #js {:channel (name channel)
                                              :msg text
                                              :username (:username user)
                                              :emailhash (:emailhash user)})
+         (.scrollTop $div (+ (.prop $div "scrollHeight") 500))
          (aset input "value" "")
          (.focus input))))))
 
@@ -84,8 +86,12 @@
     om/IDidUpdate
     (did-update [this prev-props prev-state]
       (fetch-messages owner)
-      (let [div (om/get-node owner "message-list")]
-        (aset div "scrollTop" (.-scrollHeight div))))
+      (let [div (om/get-node owner "message-list")
+            scrolltop (.-scrollTop div)
+            height (.-scrollHeight div)]
+        (when (or (zero? scrolltop)
+                  (< (- height scrolltop (.height (js/$ ".chat-app .chat-box"))) 500))
+          (aset div "scrollTop" height))))
 
     om/IRenderState
     (render-state [this state]

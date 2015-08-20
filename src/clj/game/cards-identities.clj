@@ -14,15 +14,19 @@
                              (do (damage state :runner :meat 2 {:unboostable true :card card})
                                  (system-msg state side "suffers 2 meat damage"))))}}}
 
-   "Armand \"Geist\" Walker"
+   "Armand \"Geist\" Walker: Tech Lord"
    {:effect (effect (gain :link 1))
     :events {:trash {:optional {:req (req (and (= side :runner) (= (second targets) :ability-cost)))
                                 :prompt "Draw a card?" :msg (msg "draw a card") :effect (effect (draw 1))}}}}
 
    "Blue Sun: Powering the Future"
-   {:abilities [{:msg (msg "add " (:title target) " to HQ and gain " (:cost target) " [Credits]")
-                 :choices {:req #(:rezzed %)}
-                 :effect (effect (gain :credit (:cost target)) (move target :hand))}]}
+   {:abilities [{:choices {:req #(:rezzed %)}
+                 :effect (req (trigger-event state side :pre-rez-cost target)
+                              (let [cost (rez-cost state side target)]
+                                (gain state side :credit cost)
+                                (move state side target :hand)
+                                (system-msg state side (str "add " (:title target) " to HQ and gain " cost " [Credits]"))
+                                (swap! state update-in [:bonus] dissoc :cost)))}]}
 
    "Cerebral Imaging: Infinite Frontiers"
    {:effect (req (add-watch state :cerebral-imaging
@@ -47,11 +51,8 @@
    "Exile: Streethawk"
    {:effect (effect (gain :link 1))
     :events {:runner-install {:req (req (and (has? target :type "Program")
-                                             (= (:active-player @state) :runner)
-                                             ;; only trigger when played a programm from heap
                                              (some #{:discard} (:previous-zone target))))
                               :msg (msg "draw a card") :effect (effect (draw 1))}}}
-
 
    "Gabriel Santiago: Consummate Professional"
    {:events {:successful-run {:msg "gain 2 [Credits]" :once :per-turn
@@ -59,6 +60,10 @@
 
    "GRNDL: Power Unleashed"
    {:effect (effect (gain :credit 5 :bad-publicity 1))}
+
+   "Haarpsichord Studios"
+   {:events {:pre-steal-cost {:req (req (pos? (or (:stole-agenda runner-reg) 0)))
+                              :effect (effect (prevent-steal))}}}
 
    "Haas-Bioroid: Engineering the Future"
    {:events {:corp-install {:once :per-turn :msg "gain 1 [Credits]"
@@ -127,7 +132,7 @@
    {:effect (effect (gain :link 1))
     :events {:pre-install {:req (req (and (#{"Hardware" "Program"} (:type target))
                                           (not (get-in @state [:per-turn (:cid card)]))))
-                           :effect (effect (install-cost-bonus -1))}  
+                           :effect (effect (install-cost-bonus -1))}
              :runner-install {:req (req (and (#{"Hardware" "Program"} (:type target))
                                              (not (get-in @state [:per-turn (:cid card)]))))
                               :msg (msg "reduce the install cost of " (:title target) " by 1 [Credits]")
@@ -136,6 +141,12 @@
    "Ken \"Express\" Tenma: Disappeared Clone"
    {:events {:play-event {:req (req (has? target :subtype "Run")) :once :per-turn
                           :msg "gain 1 [Credits]" :effect (effect (gain :credit 1))}}}
+
+   "Laramy Fisk: Savvy Investor"
+   {:events {:successful-run {:req (req (and (#{:hq :rd :archives} target)))
+                              :optional {:prompt "Force the Corp to draw 1 card?"
+                                         :msg "force the Corp to draw 1 card" :once :per-turn
+                                         :effect (effect (draw :corp))}}}}
 
    "Leela Patel: Trained Pragmatist"
    {:events {:agenda-scored {:choices {:req #(and (not (:rezzed %)) (= (:side %) "Corp"))} :msg "add 1 unrezzed card to HQ"

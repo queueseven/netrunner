@@ -13,6 +13,12 @@
     :effect (effect (move target :hand)
                     (system-msg (str "adds " (if (:seen target) (:title target) "a card") " to HQ")))}
 
+   "Back Channels"
+   {:prompt "Choose an installed card in a server to trash" :choices {:req #(= (last (:zone %)) :content)}
+    :effect (effect (gain :credit (* 3 (:advance-counter target))) (trash target))
+    :msg (msg "trash " (if (:rezzed target) (:title target) " a card") " and gain "
+              (* 3 (:advance-counter target)) " [Credits]")}
+
    "Bad Times"
    {:req (req tagged)}
 
@@ -34,6 +40,26 @@
    "Blue Level Clearance"
    {:effect (effect (gain :credit 5) (draw 2))}
 
+   "Casting Call"
+   {:choices {:req #(and (:type % "Agenda") (= (:zone %) [:hand]))}
+    :effect (req (let [agenda target]
+                   (resolve-ability
+                     state side {:prompt (str "Choose a server to install " (:title agenda))
+                                 :choices (server-list state agenda)
+                                 :effect (req (corp-install state side agenda target {:install-state :face-up})
+                                              ; find where the agenda ended up and host on it
+                                              (let [agenda (some #(when (= (:cid %) (:cid agenda)) %)
+                                                                 (all-installed state :corp))]
+                                                ; the operation ends up in :discard when it is played; to host it,
+                                                ; we need (host) to look for it in discard.
+                                                (host state side agenda (assoc card :zone [:discard]
+                                                                                    :seen true :installed true))
+                                                (system-msg state side
+                                                            (str "hosts Casting Call on " (:title agenda)))))}
+                     card nil)))
+    :events {:access {:req (req (= (:cid target) (:cid (:host card))))
+                      :effect (effect (gain :runner :tag 2)) :msg "give the Runner 2 tags"}}}
+
    "Celebrity Gift"
    {:choices {:max 5 :req #(and (:side % "Corp") (= (:zone %) [:hand]))}
     :msg (msg "reveal " (join ", " (map :title targets)) " and gain " (* 2 (count targets)) " [Credits]")
@@ -45,6 +71,12 @@
                       :effect (req (if (= target "1 tag")
                                      (gain state side :tag 1)
                                      (damage state side :brain 1 {:card card})))}}}
+
+   "Cerebral Static"
+   {:msg "disable the Runner's identity"
+    :effect (req (unregister-events state side (:identity runner)))
+    :leave-play (req (when-let [events (:events (card-def (:identity runner)))]
+                       (register-events state side events (:identity runner))))}
 
    "Closed Accounts"
    {:req (req tagged) :effect (effect (lose :runner :credit :all))}
@@ -119,7 +151,8 @@
             :unsuccessful {:msg "take 1 bad publicity" :effect (effect (gain :corp :bad-publicity 1))}}}
 
    "Lag Time"
-   {:events {:pre-ice-strength {:effect (effect (ice-strength-bonus 1))}}}
+   {:events {:pre-ice-strength {:effect (effect (ice-strength-bonus 1))}}
+    :leave-play {:effect (effect (update-all-ice))}}
 
    "Manhunt"
    {:events {:successful-run {:req (req (first-event state side :successful-run))
@@ -150,7 +183,7 @@
 
    "Patch"
    {:choices {:req #(and (= (:type %) "ICE") (:rezzed %))}
-    :effect (effect (host target (assoc card :zone [:discard] :seen true))
+    :effect (effect (host target (assoc card :zone [:discard] :seen true :installed true))
                     (update-ice-strength (get-card state target)))
     :events {:pre-ice-strength {:req (req (= (:cid target) (:cid (:host card))))
                                 :effect (effect (ice-strength-bonus 2))}}}
@@ -213,6 +246,23 @@
     :effect (req (doseq [c (filter #(= (:title target) (:title %)) (:discard corp))]
                    (move state side c :hand)))}
 
+   "Recruiting Trip"
+   (let [rthelp (fn rt [total left selected] 
+                  (if (> left 0) 
+                    {:prompt (str "Select a sysop (" (inc (- total left)) "/" total ")")
+                     :choices (req (filter #(and (has? % :subtype "Sysop")
+                                                 (not (some #{(:title %)} selected))) (:deck corp)))
+                     :msg (msg "put " (:title target) " into HQ") 
+                     :effect (req (move state side target :hand)
+                                  (resolve-ability 
+                                    state side 
+                                    (rt total (dec left) (cons (:title target) selected)) 
+                                    card nil))}
+                    {:effect (req (shuffle! state :corp :deck))
+                     :msg (msg "shuffle R&D")}))]
+   {:prompt "How many sysops?" :choices :credit :msg (msg "search for " target " sysops")
+    :effect (effect (resolve-ability (rthelp target target []) card nil))})
+   
    "Restoring Face"
    {:prompt "Choose a Sysop, Executive or Clone to trash"
     :msg (msg "trash " (:title target) " to remove 2 bad publicity")
