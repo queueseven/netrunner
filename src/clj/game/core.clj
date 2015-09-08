@@ -240,9 +240,14 @@
 
 (defn show-prompt
   ([state side card msg choices f] (show-prompt state side card msg choices f nil))
-  ([state side card msg choices f {:keys [priority prompt-type show-discard] :as args}]
-   (let [prompt (if (string? msg) msg (msg state side card nil))]
-     (when (or (:number choices) (#{:credit :counter} choices) (> (count choices) 0))
+  ([state side card msg choices f {:keys [priority prompt-type show-discard allow-abort] :as args}]
+   (let [prompt (if (string? msg) msg (msg state side card nil))
+         choices (if allow-abort (cons "Abort" choices) choices)]
+     (when (and (or (:number choices) (#{:credit :counter} choices) (> (count choices) 0))
+                (or (nil? card)
+                    (empty? (->> (get-in @state [side :prompt])
+                                 (map #(vec [(get-in % [:card :cid]) (:msg %)]))
+                                 (filter #(= % (vec [(:cid card) msg])))))))
        (swap! state update-in [side :prompt]
               (if priority
                 #(cons {:msg prompt :choices choices :effect f :card card
@@ -271,7 +276,7 @@
 
 (defn prompt!
   ([state side card msg choices ability] (prompt! state side card msg choices ability nil))
-  ([state side card msg choices ability {:keys [priority prompt-type] :as args}]
+  ([state side card msg choices ability args]
     (show-prompt state side card msg choices #(resolve-ability state side ability card [%]) args)))
 
 (defn optional-ability [state side card msg ability targets]
@@ -338,7 +343,7 @@
 
 (defn resolve-ability [state side {:keys [counter-cost advance-counter-cost cost effect msg req once
                                           once-key optional prompt choices end-turn player psi trace
-                                          not-distinct priority] :as ability}
+                                          allow-abort not-distinct priority] :as ability}
                        {:keys [title cid counter advance-counter] :as card} targets]
   (when ability
     (when (and optional
@@ -357,13 +362,13 @@
           (if (:req choices)
             (show-select state (or player side) card ability {:priority priority})
             (let [n ((:number choices) state side card targets)]
-              (prompt! state (or player side) card prompt {:number n} (dissoc ability :choices))))
+              (prompt! state (or player side) card prompt {:number n} (dissoc ability :choices) {:allow-abort allow-abort})))
           (let [cs (if-not (fn? choices)
                      choices
                      (let [cards (choices state side card targets)]
                              (if not-distinct
                                cards (distinct-by :title cards))))]
-            (prompt! state (or player side) card prompt cs (dissoc ability :choices) {:priority priority})))
+            (prompt! state (or player side) card prompt cs (dissoc ability :choices) {:priority priority :allow-abort allow-abort})))
         (when (and (or (not counter-cost) (<= counter-cost (or counter 0)))
                    (or (not advance-counter-cost) (<= advance-counter-cost (or advance-counter 0)))
                    (apply pay (concat [state side card] cost)))
@@ -420,11 +425,12 @@
         choice (if (= (:choices prompt) :credit)
                  (min choice (get-in @state [side :credit]))
                  choice)]
-    (when (= (:choices prompt) :credit)
-      (pay state side card :credit choice))
-    (when (= (:choices prompt) :counter)
-      (add-prop state side (:card prompt) :counter (- choice)))
-    ((:effect prompt) (or choice card))
+    (when (not= choice "Abort")
+      (when (= (:choices prompt) :credit)
+        (pay state side card :credit choice))
+      (when (= (:choices prompt) :counter)
+        (add-prop state side (:card prompt) :counter (- choice)))
+      ((:effect prompt) (or choice card)))
     (swap! state update-in [side :prompt] (fn [pr] (filter #(not= % prompt) pr)))
     (when (empty? (get-in @state [:runner :prompt]))
       (when-let [run (:run @state)]
