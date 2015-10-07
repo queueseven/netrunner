@@ -297,7 +297,14 @@
     {:successful-run {:req (req (= target :rd))
                       :effect (effect (add-prop card :counter 1))}
      :pre-access {:req (req (= target :rd))
-                  :effect (effect (access-bonus (max 0 (dec (get-virus-counters state side (get-card state card))))))}}}
+                  :effect (req (let [n (get-virus-counters state side (get-card state card))]
+                                 (when (> n 1)
+                                   (resolve-ability
+                                     state side
+                                     {:prompt "Choose how many additional accesses"
+                                      :choices {:number (req (- n 1))}
+                                      :effect (effect (access-bonus (max 0 target)))}
+                                    card nil))))}}}
 
    "Multithreader"
    {:recurring 2}

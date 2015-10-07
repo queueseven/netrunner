@@ -50,27 +50,40 @@
     (catch Exception e
       (println "Convert error " e))))
 
+(defn send-to-socket [socket gameid action]
+ (prn "sending action" action)
+  (if-let [state (@game-states gameid)]
+    (.send socket (generate-string (assoc (dissoc @state :events :turn-events :dispatch) :action action)))
+    (.send socket (generate-string "ok")))
+    (prn "sending DONE" action)
+ )
+
 (defn run [socket]
   (while true
-    (let [{:keys [gameid action command side args text] :as msg} (convert (.recv socket))
+    (let [_ (prn "call recv")
+            {:keys [gameid action command side args text] :as msg} (convert (.recv socket))
           state (@game-states gameid)]
-      (try
-        (case action
-          "start" (core/init-game msg)
-          "remove" (swap! game-states dissoc gameid)
-          "do" ((commands command) state (keyword side) args)
-          "notification" (when state
-                           (swap! state update-in [:log] #(conj % {:user "__system__" :text text}))))
-        (if-let [state (@game-states gameid)]
-          (.send socket (generate-string (assoc (dissoc @state :events :turn-events) :action action)))
-          (.send socket (generate-string "ok")))
+           (prn "ACTION" action)
+        (try
+        (future 
+          (prn "future started")
+          (case action
+            "start" (core/init-game msg (fn [] (send-to-socket socket gameid "blocking")))
+            "remove" (swap! game-states dissoc gameid)
+            "do" ((commands command) state (keyword side) args)
+            "notification" (when state
+                             (swap! state update-in [:log] #(conj % {:user "__system__" :text text}))))
+          (prn "sending")
+          (send-to-socket socket gameid action)
+          (prn "future done"))
         (catch Exception e
           (println "Error " action command (get-in args [:card :title]) e "\nStack trace:"
                    (java.util.Arrays/toString (.getStackTrace e)))
           (if (and state (#{"do" "start"} action))
             (.send socket (generate-string state))
-            (.send socket (generate-string "error"))))))))
-
+            (.send socket (generate-string "error")))))
+            (prn "after try"))))
+      
 (defn zmq-url
   []
   (str "tcp://" (or (env :zmq-host) "127.0.0.1") ":1043"))

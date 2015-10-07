@@ -269,14 +269,21 @@
 (defn show-prompt
   ([state side card msg choices f] (show-prompt state side card msg choices f nil))
   ([state side card msg choices f {:keys [priority prompt-type show-discard] :as args}]
-  (let [prompt (if (string? msg) msg (msg state side card nil))]
+  (let [prompt (if (string? msg) msg (msg state side card nil))
+        prom   (promise)]
      (when (or (:number choices) (#{:credit :counter} choices) (> (count choices) 0))
        (swap! state update-in [side :prompt]
               (if priority
-                #(cons {:msg prompt :choices choices :effect f :card card
+                #(cons {:msg prompt :choices choices :effect f :card card :promise prom
                         :prompt-type prompt-type :show-discard show-discard} (vec %))
-                #(conj (vec %) {:msg prompt :choices choices :effect f :card card
-                                :prompt-type prompt-type :show-discard show-discard})))))))
+                #(conj (vec %) {:msg prompt :choices choices :effect f :card card :promise prom
+                                :prompt-type prompt-type :show-discard show-discard})))
+         (do (prn "dispatching")
+             ((:dispatch @state))
+             (prn "waiting for promise")
+             @prom
+             (prn "promise delivered")
+             )))))
 
 (defn resolve-psi [state side card psi bet]
   (swap! state assoc-in [:psi side] bet)
@@ -455,6 +462,7 @@
       (add-prop state side (:card prompt) :counter (- choice)))
     ((:effect prompt) (or choice card))
     (swap! state update-in [side :prompt] (fn [pr] (filter #(not= % prompt) pr)))
+    (deliver (:promise prompt) :resolved)
     (when (empty? (get-in @state [:runner :prompt]))
       (when-let [run (:run @state)]
         (when (:ended run)
@@ -663,7 +671,7 @@
                          (repeat (:qty %) (:card %)))
                    (:cards deck))))
 
-(defn init-game [{:keys [players gameid] :as game}]
+(defn init-game [{:keys [players gameid] :as game} dispatch]
   (let [corp (some #(when (= (:side %) "Corp") %) players)
         runner (some #(when (= (:side %) "Runner") %) players)
         corp-deck (create-deck (:deck corp))
@@ -671,7 +679,7 @@
         corp-identity (assoc (or (get-in corp [:deck :identity]) {:side "Corp" :type "Identity"}) :cid (make-cid))
         runner-identity (assoc (or (get-in runner [:deck :identity]) {:side "Runner" :type "Identity"}) :cid (make-cid))
         state (atom
-               {:gameid gameid :log [] :active-player :runner :end-turn true
+               {:gameid gameid :log [] :active-player :runner :end-turn true :dispatch dispatch
                 :corp {:user (:user corp) :identity corp-identity
                        :deck (zone :deck (drop 5 corp-deck))
                        :hand (zone :hand (take 5 corp-deck))
