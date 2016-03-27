@@ -621,6 +621,17 @@
               card nil))}
     "Score an Agenda from HQ?")
 
+   "Political Dealings"
+   {:events {:corp-draw {:effect (req (let [drawn (take-last target (:hand corp))
+                                            agendas (filter #(is-type? % "Agenda") drawn)]
+                                      (doseq [agenda agendas]
+                                        (resolve-ability state :corp
+                                          {:optional
+                                            {:prompt (str "Reveal and install " (:title agenda) "?")
+                                             :yes-ability {:effect (effect (corp-install agenda nil
+                                                                             {:install-state (or (:install-state (card-def agenda)) :rezzed-no-cost)}))}}}
+                                          agenda nil))))}}}
+
    "Primary Transmission Dish"
    {:recurring 3}
 
