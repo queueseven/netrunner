@@ -562,6 +562,38 @@
         (is (empty? (:deck (get-runner))) "Morning Star not returned to Stack")
         (is (= "Morning Star" (:title (get-in @state [:runner :rig :program 0]))) "Morning Star still installed")))))
 
+(deftest the-price-of-freedom
+  "The Price of Freedom - A connection must be trashed"
+  (do-game 
+    (new-game (default-corp [(qty "NAPD Contract" 1)])
+              (default-runner [(qty "Kati Jones" 1) (qty "The Price of Freedom" 1)]))
+    (play-from-hand state :corp "NAPD Contract" "New remote")
+    (take-credits state :corp)
+    (is (= 7 (:credit (get-corp))) "Corp has 7 credits")
+    (play-from-hand state :runner "The Price of Freedom")
+    (is (= 2 (count (get-in @state [:runner :hand]))) "The Price of Freedom could not be played because no connection is installed")
+    (is (= 0 (count (get-in (get-runner) [:rig :resource]))) "Kati Jones is not installed")
+    (play-from-hand state :runner "Kati Jones")
+    (is (= 1 (count (get-in @state [:runner :rig :resource]))) "Kati Jones is installed")
+    (play-from-hand state :runner "The Price of Freedom")
+    (is (= 0 (count (get-in @state [:runner :hand]))) "The Price of Freedom can be played because a connection is in play")
+    (let [kj (find-card "Kati Jones" (:resource (:rig (get-runner))))]
+      (prompt-select :runner kj)
+      (is (= 0 (count (get-in (get-runner) [:rig :resource]))) "Kati Jones was trashed")
+      (is (= 1 (count (get-in (get-runner) [:discard]))) "The Price of Freedom was removed from game"))
+    (take-credits state :runner)
+    (let [napd (get-content state :remote1 0)]
+      (core/advance state :corp {:card (refresh napd)})
+      (is (= 7 (:credit (get-corp))) "Agenda could not be advanced")
+      (take-credits state :corp)
+      (is (= 10 (:credit (get-corp))) "Corp has 10 credits")
+      (take-credits state :runner)
+      (core/advance state :corp {:card (refresh napd)})
+      (core/advance state :corp {:card (refresh napd)})
+      (core/advance state :corp {:card (refresh napd)})
+      (is (= 7 (:credit (get-corp))) "NAPD could be advanced"))))
+
+    
 (deftest vamp
   "Vamp - Run HQ and use replace access to pay credits to drain equal amount from Corp"
   (do-game

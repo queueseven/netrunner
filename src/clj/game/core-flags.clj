@@ -129,7 +129,7 @@
 ;;; TODO: look into migrating these to turn-flags and run-flags.
 (defn prevent-run [state side]
   (swap! state assoc-in [:runner :register :cannot-run] true))
-
+  
 (defn prevent-draw [state side]
   (swap! state assoc-in [:runner :register :cannot-draw] true))
 
@@ -224,6 +224,11 @@
    (and (turn-flag? state side card :can-steal)
         (run-flag? state side card :can-steal))))
 
+(defn can-advance?
+  ([state side card] (can-advance? state side card nil))
+  ([state side card {:as args}]
+   (not (persistent-flag? state side card :cannot-advance))))
+        
 (defn can-score?
   ([state side card] (can-score? state side card nil))
   ([state side card {:as args}]
