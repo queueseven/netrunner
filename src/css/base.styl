@@ -28,7 +28,7 @@ h2
 
 h3
   font-size: 18px
-  margin: 0 0 5px
+  margin: 0 0 4px
 
 h4
   font-size: 14px
@@ -89,6 +89,15 @@ input, select, textarea
   &:focus
     box-shadow(0 0 6px blue)
     border-color: blue !important
+
+input[type="radio"], input[type="checkbox"]
+  height: auto
+  vertical-align: middle
+  margin: -3px 8px 0 0
+
+label
+  padding: 3px 0
+  cursor: pointer
 
 button, a.button
   display: inline-block
@@ -151,11 +160,64 @@ button.small
 
 .invalid
   color: orangered
-  margin-left: 5px
+  border-color: orangered
+
+.casual
+  color: yellow
+  border-color: yellow
+
+.legal
+  color: lawngreen
+  border-color: lawngreen
+
+.smallwarning
+    position: relative
+    background: transparent-orange
+    border: 1px solid orange
+    color: white
+    margin-left: 2px
+    margin-right: 2px
+    width: 12px
+    display: inline-block
+    text-align: center
+
+.warning
+    position: relative
+    background: #34849F
+    border: 1px solid #9AC2CF
+    margin-left: 12px
+    width: 12px
+    display: inline-block
+    text-align: center
+
+.warning:after, .warning:before
+    right: 100%
+    top: 50%
+    border: solid transparent
+    content: " "
+    height: 0
+    width: 0
+    position: absolute
+    pointer-events: none
+
+.warning:after
+    border-color: rgba(52, 132, 159, 0)
+    border-right-color: #34849F
+    border-width: 8px
+    margin-top: -8px
+
+.warning:before
+    border-color: rgba(154, 194, 207, 0)
+    border-right-color: #9AC2CF
+    border-width: 10px
+    margin-top: -10px
 
 .fake-link
   color: orange
   cursor: pointer
+
+button .fake-link
+  color: white
 
 .darken
   background-color: black
@@ -231,6 +293,48 @@ span.small
 
 .image-container
   position: relative
+
+// Faction icons
+
+.faction-icon
+  width: 24px
+  height: 24px
+  margin-left: 5px
+  background: transparent
+  background-repeat: no-repeat
+  background-size: contain
+  display: inline-block
+  vertical-align: middle
+
+  &.adam
+    background-image: url('/img/factions/runner-adam.png')
+
+  &.anarch
+    background-image: url('/img/factions/runner-anarch.png')
+
+  &.apex
+    background-image: url('/img/factions/runner-apex.png')
+
+  &.criminal
+    background-image: url('/img/factions/runner-criminal.png')
+
+  &.hb
+    background-image: url('/img/factions/corp-hb.png')
+
+  &.jinteki
+    background-image: url('/img/factions/corp-jinteki.png')
+
+  &.nbn
+    background-image: url('/img/factions/corp-nbn.png')
+
+  &.shaper
+    background-image: url('/img/factions/runner-shaper.png')
+
+  &.sunny
+    background-image: url('/img/factions/runner-sunny.png')
+
+  &.weyland
+    background-image: url('/img/factions/corp-weyland.png')
 
 // Dropdown
 
@@ -370,28 +474,12 @@ nav ul
   background-color: transparent-blue
   box-shadow: 0 0 12px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.1)
 
-.influence
-  font-size: 18px
-  font-family: sans-serif
-  line-height: 0
-  position: relative
-  top: 2px
+// Influence dots
 
-.decklist .influence
-  margin-left: 3px
+.influence.neutral
+  color: white
 
-.influence.anarch
-  color: red
-
-.influence.shaper
-  color: limegreen
-
-.influence.criminal
-  color: royalblue
-
-.influence.weyland-consortium
-  color: darkgreen
-
+// Corps
 .influence.haas-bioroid
   color: blueviolet
 
@@ -401,8 +489,27 @@ nav ul
 .influence.nbn
   color: yellow
 
-.influence.neutral
-  color: white
+.influence.weyland-consortium
+  color: darkgreen
+
+// Runners
+.influence.adam
+  color: olive
+
+.influence.anarch
+  color: orangered
+
+.influence.apex
+  color: maroon
+
+.influence.criminal
+  color: royalblue
+
+.influence.shaper
+  color: limegreen
+
+.influence.sunny-lebeau
+  color: lightslategray
 
 // Top nav
 #left-menu
@@ -416,9 +523,31 @@ nav ul
     padding-right: 12px
     border-right: 1px solid white
 
+  .spectators
+    display: none
+    position: absolute
+    padding: 4px 8px
+    top: 36px
+    border-radius: 4px
+    min-width: 180px
+
+  .player
+    display: block
+
+  .spectators-count
+    position: relative
+    cursor: pointer
+
+    &:hover
+      .spectators
+        display: block
+
+  .concede-button
+    margin-right: 12px
+
 // Auth
 
-#auth-forms
+#auth-forms, .reset-form
   input
     width: 240px
     margin-bottom: 10px
@@ -426,6 +555,14 @@ nav ul
     border-color: orange
   button
     margin-right: 5px
+
+.reset-form
+  position: absolute
+  top: 50%
+  left: 50%
+  padding: 10px 20px
+  width: 282px
+  margin: -92px 0 0 -141px
 
 .flash-message
   color: orangered
@@ -470,8 +607,14 @@ nav ul
 .cardbrowser-bg
   cover-img: url('/img/bg/DysonMemChip.jpg')
 
+.help-bg
+  cover-img: url('/img/bg/ArmitageCodebust.jpg')
+
 .about-bg
   cover-img: url('/img/bg/FastTrack.jpg')
+
+.reset-bg
+  cover-img: url('/img/bg/Logos.jpg')
 
 
 // Chat
@@ -479,7 +622,7 @@ nav ul
 .chat-app
   display-flex()
   position: absolute
-  top: 100px
+  top: 196px
   bottom: 15px
   width: 995px
 
@@ -697,6 +840,7 @@ nav ul
       padding: 0
 
       .button-bar
+        box-sizing: initial
         padding: 0 15px 15px
 
         button
@@ -727,7 +871,7 @@ nav ul
           min-width: 75px
 
       .header
-        height: 76px
+        height: 106px
         clear: both
 
         > img
@@ -808,6 +952,37 @@ nav ul
         line-height: 18px
         flex(1)
 
+.deck-status
+  position: relative
+  padding-right: 12px
+
+  .status-tooltip
+    display: none
+    position: absolute
+    left: 100%
+    top: 3px
+    z-index: 30
+    width: 185px
+    background-clip: padding-box
+    border: 1px solid white
+    border-radius: 4px
+    outline: none
+    padding: 6px 12px
+    color: white
+    transition(all 0.2s ease-in-out)
+    box-shadow(0 6px 12px rgba(0, 0, 0, .175))
+
+    > div
+      margin: 2px 0
+
+    .tick
+      margin-right: 4px
+
+  &:hover
+    cursor: default
+    .status-tooltip
+      display: inline
+
 // Game Lobby
 
 .lobby
@@ -843,7 +1018,23 @@ nav ul
     padding-bottom: 15px
 
   .games .button-bar
+    box-sizing: initial
     padding: 0 15px 15px
+
+    .rooms .roomtab
+      display: block
+      color: white
+      margin: 0 10px
+      line-height: 24px
+      float: right
+      transition(all 0.2s ease-in-out)
+
+      &:hover
+        color: orange
+        cursor: pointer
+
+      &.current
+        color: orange
 
   .game-list
     padding: 0 15px
@@ -852,6 +1043,7 @@ nav ul
 
   .gameline
     position: relative
+    min-height: 53px
     border: 1px solid white
     border-radius: 4px
     padding: 5px 10px
@@ -868,10 +1060,8 @@ nav ul
         display: none
 
     button
-      position: absolute
-      top: 50%
-      right: 10px
-      transform(translateY(-50%))
+      float: right
+      margin-top: 7px
 
   .game-panel
     position: relative
@@ -903,12 +1093,18 @@ nav ul
       .label
         display: inline-block
         text-align: center
-        color: limegreen
-        border-color: limegreen
+        color: inherit
+        border-color: inherit
         margin-right: 0
 
       .fake-link
         margin-left: 10px
+
+    .spectators
+      height: 65px
+
+      .player
+        margin-right: 12px
 
     .chat-box
       .message-list
@@ -978,6 +1174,9 @@ nav ul
       font-size: 10px
       line-height: 14px
 
+  .card.new
+    box-shadow(0 0 1px 2px orange)
+
   .card.selected
     box-shadow(0 0 1px 2px limegreen)
 
@@ -1002,24 +1201,58 @@ nav ul
     text-align: center
     margin: 2px
 
-  .advance
-    background-color: blue
+  .advance-counter
+    background-color: transparent-lightblue
 
-  .recurring
-    background-color: limegreen
+  .recurring-counter
+    background-color: transparent-green
+
+  .virus-counter
+    background-color: transparent-red
 
   .strength
     position: absolute
     z-index: 10
     padding: 0
     text-align: center
-    background-color: orange
+    background-color: transparent-orange-bright
     line-height: 24px
     font-size: 12px
     bottom: 3px
     left: 3px
     height: 24px
     width: 24px
+
+  .icon
+    position: absolute
+    z-index: 10
+    padding: 0
+    text-align: center
+    line-height: 24px
+    font-size: 12px
+    top: 3px
+    right: 3px
+    height: 24px
+    width: 24px
+
+    &.blue
+      background-color: blue
+    
+    &.red
+      background-color: red
+
+  .named-target
+    position: absolute
+    z-index: 10
+    padding: 0
+    text-align: center
+    background-color: sienna
+    line-height: 16px
+    font-size: 10px
+    top: 3px
+    right: 3px
+    height: 16px
+    width: auto
 
   .abilities, .servers-menu, .menu
     display: none
@@ -1079,7 +1312,7 @@ nav ul
     bottom: 85px
     width: 590px
     min-height: 92px
-    z-index: 10
+    z-index: 15
 
     .card
       float: left
@@ -1097,6 +1330,7 @@ nav ul
 
   .discard .popup.opponent
     top: 85px
+    bottom: auto
 
   .hand, .scored, .rfg
     height: 86px
@@ -1113,6 +1347,9 @@ nav ul
 
     &:last-child
       margin-right: 0
+
+   .disable-transition
+     transition: none
 
   .squeeze .card-wrapper
     position: absolute
@@ -1218,10 +1455,22 @@ nav ul
 
       .runner-board
         padding: 10px
+        display: flex;
+        flex-direction: column;
+
+        > div:first-child
+          margin-top: auto
 
       .content.shift > .card-frame
         margin-left: 8px
-        margin-top: -8px
+        margin-top: -16px
+
+      .runner-board.opponent
+        > div:first-child
+          margin-top: 0px
+
+        > div:last-child
+          margin-bottom: auto
 
       .corp-board
         display-flex()
@@ -1230,6 +1479,7 @@ nav ul
           margin: 0 4px
           transform(rotate(180deg))
           position: relative
+          z-index: 1
 
           .ices
             position: relative
@@ -1237,6 +1487,9 @@ nav ul
             margin-top: 22px
 
             .strength
+              transform(rotate(90deg))
+
+            .icon
               transform(rotate(90deg))
 
             .run-arrow
@@ -1265,6 +1518,13 @@ nav ul
                 left: 50%
                 transform(translateX(-50%))
                 border-bottom: 22px solid rgba(255, 165, 0, 0.5)
+
+            .run-card
+              position: absolute
+              text-align: center
+              bottom: -154px
+              transform(rotate(180deg))
+              width: 100%
 
             .hosted
               position: absolute
@@ -1306,6 +1566,7 @@ nav ul
             height: 86px
 
             .card
+              margin: 0 -40px 0 0
               .abilities
                 left: -145px
                 bottom: 85px
@@ -1314,6 +1575,9 @@ nav ul
       .corp-board.opponent
         .server
           transform(rotate(0))
+
+          &:nth-child(n+4)
+            z-index: auto
 
           .content
             transform(rotate(0))
@@ -1324,6 +1588,9 @@ nav ul
           .strength
             transform(rotate(-90deg))
 
+          .icon
+            transform(rotate(-90deg))
+
           .ices
             .hosted
               .card-frame
@@ -1332,6 +1599,11 @@ nav ul
                 .counters
                   transform(rotate(-90deg))
 
+            .counter
+              transform(rotate(-90deg))
+
+            .run-card
+              transform(rotate(0deg))
 
       .card-wrapper
         margin-right: 10px
@@ -1401,6 +1673,55 @@ nav ul
         input
           width: 100%
 
+#help
+  position: absolute
+  top: 0
+  left: 0
+  right: 0
+  bottom: 0
+  overflow: auto
+
+#help nav li
+  padding-left: 3px
+  font-weight: bold
+
+#help nav li li
+  padding-left: 8px
+  font-weight: normal
+
+.help
+  padding: 10px 20px
+  width: 650px
+  margin: 40px auto 10px
+
+  > h3
+    margin-top: -35px
+    padding-top: 35px
+    -webkit-background-clip: content-box
+    background-clip: content-box
+
+  > h3:target
+    animation: highlight 1.5s ease
+
+  > h4
+    margin-top: -35px
+    padding-top: 35px
+    -webkit-background-clip: content-box
+    background-clip: content-box
+
+  > h4:target
+    animation: highlight 1.5s ease
+
+  li
+    padding-left: 20px
+    list-style-type: none
+
+@keyframes highlight
+  from
+    background: darkolivegreen
+  to
+    background: none
+
 #about
   position: absolute
   top: 0
@@ -1430,3 +1751,27 @@ nav ul
     &:hover
       .qr
         display: block
+
+// News
+
+.news-box
+  margin-left: 0
+  min-height: 1px
+  padding-right: 0px
+
+  .list
+    height: 85px
+    margin: 0
+    overflow: auto
+    padding: 0
+    -webkit-overflow-scrolling: touch
+
+  .news-item
+    margin-bottom: 4px
+
+    .title p
+        display: inline
+
+    .date
+      margin-right: 10px
+      font-weight: bold

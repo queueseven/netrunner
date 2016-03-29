@@ -1,5 +1,6 @@
 node_modules
 
+figwheel_server.log
 pom.xml
 *jar
 /lib/
@@ -11,6 +12,7 @@ pom.xml
 .lein-plugins/
 .repl
 .nrepl-port
+.nrepl-history
 
 /resources/public/js/
 /resources/public/cljs/
@@ -19,3 +21,4 @@ pom.xml
 /resources/public/img/cards
 /data/andb-*.json
 /data/img
+/.lein-failures

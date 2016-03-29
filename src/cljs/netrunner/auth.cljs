@@ -51,15 +51,26 @@
   (let [params (-> event .-target js/$ .serialize)
         _ (.-serialize (js/$ (.-target event)))] ;; params is nil when built in :advanced mode. This fixes the issue.
     (go (let [response (<! (POST url params))]
-          (case (:status response)
-            401 (om/set-state! owner :flash-message "Invalid login or password")
-            422 (om/set-state! owner :flash-message "Username taken")
-            (-> js/document .-location (.reload true)))))))
+          (if (and (= (:status response) 200) (= (:owner "/forgot") "/forgot") )
+            (om/set-state! owner :flash-message "Reset password sent")
+            (case (:status response)
+                401 (om/set-state! owner :flash-message "Invalid login or password")
+                421 (om/set-state! owner :flash-message "No account with that email address exists")
+                422 (om/set-state! owner :flash-message "Username taken")
+                423 (om/set-state! owner :flash-message "Username too short/too long")
+                (-> js/document .-location (.reload true))))))))
 
 (defn check-username [event owner]
   (go (let [response (<! (GET (str "/check/" (.-value (om/get-node owner "username")))))]
-        (if (= (:status response) 422)
-          (om/set-state! owner :flash-message "Username taken")
+        (case (:status response)
+          422 (om/set-state! owner :flash-message "Username taken")
+          423 (om/set-state! owner :flash-message "Username too short/too long")
+          (om/set-state! owner :flash-message "")))))
+
+(defn check-email [event owner]
+  (go (let [response (<! (GET (str "/check/" (.-value (om/get-node owner "email")))))]
+        (if (= (:status response) 421)
+          (om/set-state! owner :flash-message "No account with that email address exists")
           (om/set-state! owner :flash-message "")))))
 
 (defn register [event owner]
@@ -70,6 +81,8 @@
     (cond
       (empty? email) (om/set-state! owner :flash-message "Email can't be empty")
       (empty? username) (om/set-state! owner :flash-message "Username can't be empty")
+      (> 4 (count username)) (om/set-state! owner :flash-message "Username must be 4 characters or longer")
+      (< 16 (count username)) (om/set-state! owner :flash-message "Username must be 16 characters or shorter")
       (empty? password) (om/set-state! owner :flash-message "Password can't be empty")
       :else (handle-post event owner "/register" "register-form"))))
 
@@ -88,13 +101,16 @@
          [:form {:on-submit #(register % owner)}
           [:p [:input {:type "text" :placeholder "Email" :name "email" :ref "email"}]]
           [:p [:input {:type "text" :placeholder "Username" :name "username" :ref "username"
-                       :on-blur #(check-username % owner)}]]
+                       :on-blur #(check-username % owner) :maxLength "16"}]]
           [:p [:input {:type "password" :placeholder "Password" :name "password" :ref "password"}]]
           [:p [:button "Sign up"]
               [:button {:data-dismiss "modal"} "Cancel"]]]
          [:p "Already have an account? "
           [:span.fake-link {:on-click #(.modal (js/$ "#login-form") "show")
-                            :data-dismiss "modal"} "Log in"]]]]))))
+                            :data-dismiss "modal"} "Log in"]]
+         [:p "Need to reset your password? "
+          [:span.fake-link {:on-click #(.modal (js/$ "#forgot-form") "show")
+                            :data-dismiss "modal"} "Reset"]]]]))))
 
 (defn login-form [cursor owner]
   (reify
@@ -112,6 +128,30 @@
           [:p [:input {:type "text" :placeholder "Username" :name "username"}]]
           [:p [:input {:type "password" :placeholder "Password" :name "password"}]]
           [:p [:button "Log in"]
+           [:button {:data-dismiss "modal"} "Cancel"]]
+          [:p "No account? "
+           [:span.fake-link {:on-click #(.modal (js/$ "#register-form") "show")
+                             :data-dismiss "modal"} "Sign up!"]]
+          [:p "Forgot your password? "
+           [:span.fake-link {:on-click #(.modal (js/$ "#forgot-form") "show")
+                             :data-dismiss "modal"} "Reset"]]]]]))))
+
+(defn forgot-form [cursor owner]
+  (reify
+    om/IInitState
+    (init-state [this] {:flash-message ""})
+
+    om/IRenderState
+    (render-state [this state]
+      (sab/html
+       [:div.modal.fade#forgot-form {:ref "forgot-form"}
+        [:div.modal-dialog
+         [:h3 "Reset your Password"]
+         [:p.flash-message (:flash-message state)]
+         [:form {:on-submit #(handle-post % owner "/forgot" "forgot-form")}
+          [:p [:input {:type "text" :placeholder "Email" :name "email"
+                       :on-blur #(check-email % owner)}]]
+          [:p [:button "Submit"]
               [:button {:data-dismiss "modal"} "Cancel"]]
           [:p "No account? "
             [:span.fake-link {:on-click #(.modal (js/$ "#register-form") "show")
@@ -123,7 +163,8 @@
     (when-not (:user @app-state)
       [:div
        (om/build register-form cursor)
-       (om/build login-form cursor)]))))
+       (om/build login-form cursor)
+       (om/build forgot-form cursor)]))))
 
 (om/root auth-menu app-state {:target (. js/document (getElementById "right-menu"))})
 (om/root auth-forms app-state {:target (. js/document (getElementById "auth-forms"))})
