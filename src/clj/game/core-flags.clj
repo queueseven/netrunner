@@ -130,6 +130,11 @@
 (defn prevent-run [state side]
   (swap! state assoc-in [:runner :register :cannot-run] true))
 
+;; prevent-advance affects the corp, but be need store it in the runner's register
+;; so it is cleared when the next runner turn starts, not the next corp turn
+(defn prevent-advance [state side]
+  (swap! state assoc-in [:runner :register :cannot-advance] true))
+  
 (defn prevent-draw [state side]
   (swap! state assoc-in [:runner :register :cannot-draw] true))
 

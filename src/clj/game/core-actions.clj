@@ -226,13 +226,14 @@
 (defn advance
   "Advance a corp card that can be advanced."
   [state side {:keys [card]}]
-  (when-let [cost (pay state side card :click 1 :credit 1)]
-    (let [spent   (build-spend-msg cost "advance")
-          card    (card-str state card)
-          message (str spent card)]
-      (system-msg state side message))
-    (update-advancement-cost state side card)
-    (add-prop state side (get-card state card) :advance-counter 1)))
+  (when (not (get-in @state [:runner :register :cannot-advance]))
+    (when-let [cost (pay state side card :click 1 :credit 1)]
+      (let [spent   (build-spend-msg cost "advance")
+            card    (card-str state card)
+            message (str spent card)]
+        (system-msg state side message))
+      (update-advancement-cost state side card)
+      (add-prop state side (get-card state card) :advance-counter 1))))
 
 (defn score
   "Score an agenda."
