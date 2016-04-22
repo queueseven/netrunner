@@ -253,7 +253,7 @@ passport.use new localStrategy (username, password, done) ->
     bcrypt.compare password, user.password, (err, valid) ->
     	return done(err) if err
     	return done(null, false) if not valid
-    	done(null, {username: user.username, emailhash: user.emailhash, _id: user._id})
+    	done(null, {username: user.username, emailhash: user.emailhash, _id: user._id, sb: user.sb})
 
 passport.serializeUser (user, done) ->
   done(null, user._id) if user
@@ -261,7 +261,7 @@ passport.serializeUser (user, done) ->
 passport.deserializeUser (id, done) ->
   db.collection('users').findById id, (err, user) ->
     console.log err if err
-    done(err, {username: user.username, emailhash: user.emailhash, _id: user._id, special: user.special})
+    done(err, {username: user.username, emailhash: user.emailhash, _id: user._id, special: user.special, sb: user.sb})
 
 # Routes
 app.options('*', cors())

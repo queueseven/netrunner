@@ -44,12 +44,23 @@
                :data-target "#main" :data-slide-to (last page)}
           [:a {:href route} (first page)]]))])))
 
+(defn two-players-in-game [game]
+  (= (count (:players game)) 2))
+
+(defn any-sb-user [game]
+  (->> game :players (map :user) (map :sb) (some pos?)))
+
+(defn filter-sb [user games]
+  (if (pos? (:sb user))
+        (filter #(or (two-players-in-game %) (any-sb-user %)) games)
+        (remove any-sb-user games)))
+
 (defn status [cursor owner]
   (om/component
    (sab/html
     [:div
      [:div.float-right
-      (let [c (count (:games cursor))]
+      (let [c (count (filter-sb (:user cursor) (:games cursor)))]
         (str c " Game" (when (not= c 1) "s")))]
      (when-let [game (some #(when (= (:gameid cursor) (:gameid %)) %) (:games cursor))]
        (when (:started game)

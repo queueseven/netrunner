@@ -4,7 +4,7 @@
             [sablono.core :as sab :include-macros true]
             [cljs.core.async :refer [chan put! <!] :as async]
             [clojure.string :refer [join]]
-            [netrunner.main :refer [app-state]]
+            [netrunner.main :refer [app-state filter-sb]]
             [netrunner.auth :refer [authenticated avatar] :as auth]
             [netrunner.gameboard :refer [init-game game-state]]
             [netrunner.cardbrowser :refer [image-url] :as cb]
@@ -172,7 +172,7 @@
        (cond
          (and (some? faction) (not= "Neutral" faction)) (faction-icon faction identity)
          side [:span.side (str "(" side ")")]))])))
-
+         
 (defn chat-view [messages owner]
   (reify
     om/IDidUpdate
@@ -201,8 +201,8 @@
           [:input {:ref "msg-input" :placeholder "Say something" :accessKey "l"}]
           [:button "Send"]]]]))))
 
-(defn game-list [{:keys [games gameid] :as cursor} owner]
-  (let [roomgames (filter #(= (:room %) (om/get-state owner :current-room)) games)]
+(defn game-list [{:keys [games gameid user] :as cursor} owner]
+  (let [roomgames (filter-sb user (filter #(= (:room %) (om/get-state owner :current-room)) games))]
     [:div.game-list
      (if (empty? roomgames)
        [:h4 "No games"]
@@ -235,7 +235,7 @@
           (if gameid
             [:button.float-left {:class "disabled"} "New game"]
             [:button.float-left {:on-click #(new-game cursor owner)} "New game"])
-          (let [count-games (fn [room] (count (filter #(= room (:room %)) games)))
+          (let [count-games (fn [room] (count (filter-sb user (filter #(= room (:room %)) games))))
                 room-tab (fn [room roomname]
                            [:span.roomtab
                             (if (= room (om/get-state owner :current-room))
