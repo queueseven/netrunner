@@ -144,13 +144,13 @@
                                  (can-pay? state :runner name :credit trash-cost))
                           ;; If the runner is forced to trash this card (Neutralize All Threats)
                           (resolve-ability state :runner {:cost [:credit trash-cost]
-                                                          :effect (effect (trash card)
+                                                          :effect (effect (trash card {:cause :paid})
                                                                           (system-msg (str "is forced to pay " trash-cost
                                                                                            " [Credits] to trash " (:title card))))} card nil)
                           ;; Otherwise, show the option to pay to trash the card.
                           (optional-ability state :runner card (str "Pay " trash-cost "[Credits] to trash " name "?")
                                             {:yes-ability {:cost [:credit trash-cost]
-                                                           :effect (effect (trash card)
+                                                           :effect (effect (trash card {:cause :paid})
                                                                            (system-msg (str "pays " trash-cost " [Credits] to trash "
                                                                                             (:title card))))}} nil)))
                       ;; The card does not have a trash cost

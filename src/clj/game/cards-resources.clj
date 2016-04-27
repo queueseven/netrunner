@@ -744,6 +744,11 @@
                                 :msg (msg "draw a card")
                                 :effect (effect (draw 1))}}}
 
+   "Salsette Slums"
+   {:events {:pre-trash {:req (req (not (get-in @state [:per-turn (:cid card)])))
+                         :effect (req (swap! state assoc-in [:runner :register :trash-replace] {:check #(when (= % :paid) :rfg)
+                                                                                                :callback #(swap! state assoc-in [:per-turn (:cid card)] true)}))}}}
+
    "Same Old Thing"
    {:abilities [{:cost [:click 2]
                  :req (req (and (not (seq (get-in @state [:runner :locked :discard])))

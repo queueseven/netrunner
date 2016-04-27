@@ -243,9 +243,16 @@
 (defn resolve-trash
   [state side {:keys [zone type] :as card} {:keys [unpreventable cause keep-server-alive] :as args} & targets]
   (let [cdef (card-def card)
-        moved-card (move state (to-keyword (:side card)) card :discard {:keep-server-alive keep-server-alive})]
-    (when-let [trash-effect (:trash-effect cdef)]
-      (resolve-ability state side trash-effect moved-card (cons cause targets)))
+        replacer (get-in @state [:runner :register :trash-replace])
+        replacer-zone (when replacer ((:check replacer) cause))
+        target-zone (or replacer-zone :discard)
+        moved-card (move state (to-keyword (:side card)) card target-zone {:keep-server-alive keep-server-alive})]
+    (when replacer-zone
+      ((:callback replacer)))
+    (swap! state assoc-in [:runner :register :trash-replace] nil)
+    (let [trash-effect (:trash-effect cdef)]
+      (when (and trash-effect (= target-zone :discard))
+        (resolve-ability state side trash-effect moved-card (cons cause targets))))
     (swap! state update-in [:per-turn] dissoc (:cid moved-card))))
 
 (defn trash
@@ -259,7 +266,9 @@
        (let [ktype (keyword (clojure.string/lower-case type))]
          (when (and (not unpreventable) (not= cause :ability-cost))
            (swap! state update-in [:trash :trash-prevent] dissoc ktype))
-         (when (and (not suppress-event) (not= (last zone) :current)) ; Trashing a current does not trigger a trash event.
+         (when (and (not suppress-event)
+                    (not= (last zone) :current) ; Trashing a current does not trigger a trash event.
+                    (some true? ((juxt nil? :discard) (when-let [replacer (get-in @state [:runner :register :trash-replace])] ((:check replacer) cause)))))
            (apply trigger-event state side (keyword (str (name side) "-trash")) card cause targets))
          (let [prevent (get-in @state [:prevent :trash ktype])]
            ;; Check for prevention effects
