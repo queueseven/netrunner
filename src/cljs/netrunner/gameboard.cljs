@@ -771,11 +771,12 @@
                               :run (when (= server-type "rd") run)})
        (om/build server-view {:server (:hq servers) :central true
                               :run (when (= server-type "hq") run)})
-       (for [server (get-remotes servers)]
-         (let [num (remote->num (first server))]
-           (om/build server-view {:server (second server)
-                                  :run (when (= server-type (str "remote" num)) run)}
-                                 {:opts {:name (remote->name (first server))}})))]))))
+       [:div.corp-board.remotes
+         (for [server (get-remotes servers)]
+           (let [num (remote->num (first server))]
+             (om/build server-view {:server (second server)
+                                    :run (when (= server-type (str "remote" num)) run)}
+                                   {:opts {:name (remote->name (first server))}})))]]))))
 
 (defmethod board-view "Runner" [{:keys [player run]}]
   (om/component
